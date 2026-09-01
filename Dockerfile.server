@@ -1,0 +1,33 @@
+# syntax=docker/dockerfile:1.7
+
+FROM rust:1.96-bookworm AS build
+WORKDIR /app
+
+ENV CARGO_INCREMENTAL=0
+
+COPY Cargo.toml Cargo.lock ./
+COPY server/Cargo.toml ./server/Cargo.toml
+COPY src-tauri/Cargo.toml src-tauri/build.rs ./src-tauri/
+COPY src-tauri/src ./src-tauri/src
+COPY server ./server
+
+RUN --mount=type=cache,id=renuxa-cargo-registry,target=/usr/local/cargo/registry \
+    --mount=type=cache,id=renuxa-cargo-git,target=/usr/local/cargo/git \
+    --mount=type=cache,id=renuxa-target,target=/app/target \
+    cargo build --locked --release -p renuxa-server --bins && \
+    cp /app/target/release/renuxa-server /tmp/renuxa-server && \
+    cp /app/target/release/worker /tmp/renuxa-worker
+
+FROM debian:bookworm-slim
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends ca-certificates curl && \
+    useradd --create-home --uid 10001 renuxa && \
+    rm -rf /var/lib/apt/lists/*
+
+COPY --from=build /tmp/renuxa-server /usr/local/bin/renuxa-server
+COPY --from=build /tmp/renuxa-worker /usr/local/bin/renuxa-worker
+
+USER renuxa
+ENV BIND_ADDR=0.0.0.0:8080
+EXPOSE 8080
+CMD ["renuxa-server"]
