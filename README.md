@@ -41,6 +41,13 @@ docker compose pull
 docker compose up -d
 ```
 
+默认的 `docker-compose.yml` 使用 Docker Hub 预构建镜像，不会在服务器上重新编译。
+如果需要在本机编译镜像（例如修改了 Rust 或前端代码），使用本地构建文件：
+
+```bash
+docker compose -f docker-compose.build.yml up --build -d
+```
+
 ### Linux 服务器（Docker Engine）
 
 安装 Docker Engine 和 Docker Compose Plugin。以 Ubuntu/Debian 为例，建议按照 [Docker 官方安装文档](https://docs.docker.com/engine/install/) 配置软件源，然后确认以下命令可用：
@@ -69,6 +76,12 @@ docker compose pull
 docker compose up -d
 ```
 
+如需本地构建而不是拉取镜像：
+
+```bash
+docker compose -f docker-compose.build.yml up --build -d
+```
+
 默认部署版本为 `0.1.0`。升级时可在 `.env` 中设置 `RENUXA_VERSION`，再重新拉取并启动。
 
 服务器防火墙至少需要允许 Web 端口 `3000` 和 API 端口 `8080`。Mailpit 的 `8025` 和 SMTP 的 `1025` 仅用于开发调试，不应直接暴露到公网。生产环境建议通过 HTTPS 反向代理统一暴露 Web 和 API。
@@ -88,6 +101,9 @@ docker compose down
 # 拉取镜像并后台启动
 docker compose pull
 docker compose up -d
+
+# 使用本地源码构建并后台启动
+docker compose -f docker-compose.build.yml up --build -d
 ```
 
 服务默认地址：
@@ -110,6 +126,7 @@ npm run desktop:dev
 - `server/`：Axum API、SQLx 迁移与后台 Worker
 - `src-tauri/`：macOS/Windows 桌面应用配置
 - `docker-compose.yml`：Web、PostgreSQL、API、Worker 与开发邮件服务
+- `docker-compose.build.yml`：使用本地 Dockerfile 构建 Web、API 和 Worker
 
 ## 生产配置
 
