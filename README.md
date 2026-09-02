@@ -37,7 +37,8 @@ colima start --cpu 4 --memory 6
 
 ```bash
 cp .env.example .env
-docker compose up --build -d
+docker compose pull
+docker compose up -d
 ```
 
 ### Linux 服务器（Docker Engine）
@@ -55,18 +56,20 @@ docker compose version
 cp .env.example .env
 ```
 
-如果只在服务器本机浏览器访问，`.env.example` 中的默认 `VITE_API_URL` 可以直接使用。如果从其他电脑访问服务器，必须将它改为浏览器可访问的地址，例如：
+发布的 Web 镜像会通过容器网络将同源 `/api` 请求代理到 API 服务，因此部署服务器不需要根据 IP 地址重新编译前端。至少在 `.env` 中替换 `JWT_SECRET`：
 
 ```dotenv
 JWT_SECRET=replace-with-a-long-random-secret
-VITE_API_URL=http://192.0.2.10:8080/api
 ```
 
-`VITE_API_URL` 会在 Web 镜像构建时写入前端，因此修改后需要重新构建：
+拉取指定版本的预构建镜像并启动：
 
 ```bash
-docker compose up --build -d
+docker compose pull
+docker compose up -d
 ```
+
+默认部署版本为 `0.1.0`。升级时可在 `.env` 中设置 `RENUXA_VERSION`，再重新拉取并启动。
 
 服务器防火墙至少需要允许 Web 端口 `3000` 和 API 端口 `8080`。Mailpit 的 `8025` 和 SMTP 的 `1025` 仅用于开发调试，不应直接暴露到公网。生产环境建议通过 HTTPS 反向代理统一暴露 Web 和 API。
 
@@ -82,8 +85,9 @@ docker compose logs -f
 # 停止并移除容器，保留 PostgreSQL 数据卷
 docker compose down
 
-# 重新构建并后台启动
-docker compose up --build -d
+# 拉取镜像并后台启动
+docker compose pull
+docker compose up -d
 ```
 
 服务默认地址：

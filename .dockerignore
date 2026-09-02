@@ -1,6 +1,5 @@
 node_modules
 dist
-dist-desktop
 target
 .git
 .wrangler

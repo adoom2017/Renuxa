@@ -4,6 +4,8 @@ FROM rust:1.96-bookworm AS build
 WORKDIR /app
 
 ENV CARGO_INCREMENTAL=0
+ENV CARGO_BUILD_JOBS=1
+ARG TARGETARCH
 
 COPY Cargo.toml Cargo.lock ./
 COPY server/Cargo.toml ./server/Cargo.toml
@@ -13,7 +15,7 @@ COPY server ./server
 
 RUN --mount=type=cache,id=renuxa-cargo-registry,target=/usr/local/cargo/registry \
     --mount=type=cache,id=renuxa-cargo-git,target=/usr/local/cargo/git \
-    --mount=type=cache,id=renuxa-target,target=/app/target \
+    --mount=type=cache,id=renuxa-target-${TARGETARCH},target=/app/target \
     cargo build --locked --release -p renuxa-server --bins && \
     cp /app/target/release/renuxa-server /tmp/renuxa-server && \
     cp /app/target/release/worker /tmp/renuxa-worker

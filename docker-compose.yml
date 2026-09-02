@@ -1,19 +1,12 @@
 x-server-image: &server-image
-  image: renuxa-server:local
-  build:
-    context: .
-    dockerfile: Dockerfile.server
+  image: adoom2018/renuxa-server:${RENUXA_VERSION:-0.1.0}
 
 services:
   web:
-    build:
-      context: .
-      dockerfile: Dockerfile.web
-      args:
-        VITE_API_URL: ${VITE_API_URL:-http://localhost:8080/api}
+    image: adoom2018/renuxa-web:${RENUXA_VERSION:-0.1.0}
     restart: unless-stopped
     init: true
-    ports: ["3000:3000"]
+    ports: ["3000:80"]
     depends_on: { api: { condition: service_healthy } }
 
   postgres:
