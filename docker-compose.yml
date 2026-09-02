@@ -25,7 +25,6 @@ services:
     environment:
       DATABASE_URL: postgres://renuxa:renuxa@postgres:5432/renuxa
       JWT_SECRET: ${JWT_SECRET:-development-only-change-me}
-    ports: ["8080:8080"]
     depends_on: { postgres: { condition: service_healthy } }
     healthcheck:
       test: ["CMD", "curl", "--fail", "--silent", "http://127.0.0.1:8080/health"]
@@ -49,6 +48,5 @@ services:
   mailpit:
     image: axllent/mailpit:latest
     restart: unless-stopped
-    ports: ["8025:8025", "1025:1025"]
 volumes:
   postgres-data:

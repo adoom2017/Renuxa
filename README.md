@@ -84,7 +84,9 @@ docker compose -f docker-compose.build.yml up --build -d
 
 默认部署版本为 `0.1.0`。升级时可在 `.env` 中设置 `RENUXA_VERSION`，再重新拉取并启动。
 
-服务器防火墙至少需要允许 Web 端口 `3000` 和 API 端口 `8080`。Mailpit 的 `8025` 和 SMTP 的 `1025` 仅用于开发调试，不应直接暴露到公网。生产环境建议通过 HTTPS 反向代理统一暴露 Web 和 API。
+正式的 `docker-compose.yml` 只向宿主机暴露 Web 端口 `3000`。API、PostgreSQL 和 Mailpit 仅在 Compose 内部网络通信，无需开放对应的防火墙端口。生产环境建议通过 HTTPS 反向代理暴露 Web。
+
+本地调试使用 `docker-compose.build.yml`，该配置额外暴露 API 的 `8080`、Mailpit Web 的 `8025` 和 SMTP 的 `1025` 端口。
 
 ### 常用命令
 
@@ -111,8 +113,8 @@ docker compose -f docker-compose.build.yml up --build -d
 | 服务 | 本机地址 | 用途 |
 | --- | --- | --- |
 | Web | `http://127.0.0.1:3000` | Renuxa Web 界面 |
-| API | `http://127.0.0.1:8080` | Rust API 与健康检查 |
-| Mailpit | `http://127.0.0.1:8025` | 查看开发环境邮件 |
+| API（本地构建配置） | `http://127.0.0.1:8080` | Rust API 与健康检查 |
+| Mailpit（本地构建配置） | `http://127.0.0.1:8025` | 查看开发环境邮件 |
 
 ## 桌面开发
 
