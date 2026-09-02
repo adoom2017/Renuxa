@@ -2,7 +2,7 @@
 
 import {
   Bell, CalendarDays, Check, ChevronLeft, ChevronRight, CircleDollarSign, CreditCard, Globe2,
-  LayoutDashboard, Menu, Pause, Play, Plus, ReceiptText,
+  LayoutDashboard, Mail, Menu, Pause, Play, Plus, ReceiptText, Send,
   RefreshCw, Search, Settings, ShieldCheck, SlidersHorizontal, Trash2,
   WalletCards, X,
 } from 'lucide-react';
@@ -20,6 +20,11 @@ type Subscription = {
 
 type Bill = { id: string; subscription: string; date: string; amount: number; currency: string; status: BillStatus };
 type Notice = { id: string; title: string; body: string; date: string; read: boolean; kind: 'renewal' | 'bill' | 'system' };
+type NotificationSettings = {
+  telegram_enabled: boolean; telegram_bot_token_configured: boolean; telegram_chat_id: string;
+  email_enabled: boolean; smtp_host: string; smtp_port: number; smtp_tls: boolean;
+  smtp_from: string; smtp_username: string; smtp_password_configured: boolean;
+};
 
 const seedSubscriptions: Subscription[] = [
   { id: 'sub-figma', name: 'Figma', plan: 'Professional', amount: 15, currency: 'USD', cadence: 'monthly', nextDate: '2026-09-03', category: '工作效率', status: 'active', color: '#242424' },
@@ -39,7 +44,7 @@ const seedBills: Bill[] = [
 ];
 
 const seedNotices: Notice[] = [
-  { id: 'n-1', title: 'Figma 将在 2 天后续费', body: '预计扣款 US$15.00，邮件提醒已安排。', date: '今天 09:00', read: false, kind: 'renewal' },
+  { id: 'n-1', title: 'Figma 将在 2 天后续费', body: '预计扣款 US$15.00，到期提醒已安排。', date: '今天 09:00', read: false, kind: 'renewal' },
   { id: 'n-2', title: 'iCloud+ 账单已确认', body: '8 月账单 CN¥68.00 已计入支出统计。', date: '8月6日', read: false, kind: 'bill' },
   { id: 'n-3', title: '每日汇率已更新', body: '当前汇率数据日期为 2026 年 8 月 31 日。', date: '昨天', read: false, kind: 'system' },
 ];
@@ -212,7 +217,7 @@ export default function RenuxaApp() {
         {view === 'subscriptions' && <SubscriptionsView subscriptions={subscriptions} t={t} onAdd={() => setModalOpen(true)} onStatus={updateStatus} onRemove={removeSubscription} />}
         {view === 'bills' && <BillsView bills={bills} t={t} onUpdate={updateBill} />}
         {view === 'notifications' && <NotificationsView notices={notices} t={t} onRead={readNotice} onReadAll={readAllNotices} />}
-        {view === 'settings' && <SettingsView locale={locale} setLocale={setLocale} currency={baseCurrency} setCurrency={setBaseCurrency} t={t} userEmail={userEmail} onLogout={() => { setToken(null); setUserEmail(''); }} />}
+        {view === 'settings' && <SettingsView locale={locale} setLocale={setLocale} currency={baseCurrency} setCurrency={setBaseCurrency} t={t} token={token} userEmail={userEmail} onLogout={() => { setToken(null); setUserEmail(''); }} />}
       </section>
       {modalOpen && <AddSubscriptionModal locale={locale} onClose={() => setModalOpen(false)} onSave={addSubscription} />}
     </main>
@@ -318,11 +323,54 @@ function NotificationsView({ notices, t, onRead, onReadAll }: { notices: Notice[
   return <><PageHeader eyebrow="INBOX" title={t.notifications} description={t.noticesDesc} action={<button className="secondary" onClick={onReadAll} disabled={!notices.some((notice) => !notice.read)}><Check size={16}/>{t.markAll}</button>}/>{notices.length > 0 ? <section className="notification-list">{notices.map((notice)=><button key={notice.id} className={`notification-item ${notice.read?'read':''}`} onClick={()=>onRead(notice.id)}><span className={`notification-kind ${notice.kind}`}>{notice.kind==='renewal'?<RefreshCw/>:notice.kind==='bill'?<ReceiptText/>:<Globe2/>}</span><span className="notification-copy"><strong>{notice.title}</strong><small>{notice.body}</small></span><time>{notice.date}</time>{!notice.read&&<i/>}</button>)}</section> : <div className="empty-state page-empty"><Bell/><strong>暂无通知</strong><span>续费提醒和账单消息会显示在这里。</span></div>}</>;
 }
 
-function SettingsView({ locale, setLocale, currency, setCurrency, t, userEmail, onLogout }: { locale:Locale; setLocale:(v:Locale)=>void; currency:string; setCurrency:(v:string)=>void; t:typeof copy['zh-CN']; userEmail:string; onLogout:()=>void }) {
+const defaultNotificationSettings: NotificationSettings = {
+  telegram_enabled: false, telegram_bot_token_configured: false, telegram_chat_id: '',
+  email_enabled: false, smtp_host: '', smtp_port: 587, smtp_tls: true,
+  smtp_from: '', smtp_username: '', smtp_password_configured: false,
+};
+
+function SettingsView({ locale, setLocale, currency, setCurrency, t, token, userEmail, onLogout }: { locale:Locale; setLocale:(v:Locale)=>void; currency:string; setCurrency:(v:string)=>void; t:typeof copy['zh-CN']; token:string|null; userEmail:string; onLogout:()=>void }) {
   const [tab,setTab]=useState<'general'|'notifications'|'security'>('general');
   const [timezone,setTimezone]=useStoredState('renuxa.timezone','Asia/Shanghai');
   const [reminders,setReminders]=useStoredState<number[]>('renuxa.reminders',[7,3,1]);
-  return <><PageHeader eyebrow="PREFERENCES" title={t.settings} description={t.settingsDesc}/><div className="settings-layout"><nav className="settings-nav" aria-label="设置分类"><button className={tab==='general'?'active':''} onClick={()=>setTab('general')}><Globe2/>通用</button><button className={tab==='notifications'?'active':''} onClick={()=>setTab('notifications')}><Bell/>通知</button><button className={tab==='security'?'active':''} onClick={()=>setTab('security')}><ShieldCheck/>账户与安全</button></nav><section className="settings-content">{tab==='general'&&<div className="settings-group"><h2>显示与地区</h2><SettingRow title="界面语言" description="更改界面中的文字语言"><select aria-label="界面语言" value={locale} onChange={(e)=>setLocale(e.target.value as Locale)}><option value="zh-CN">简体中文</option><option value="en">English</option></select></SettingRow><SettingRow title="基准货币" description="仪表盘和统计的默认折算货币"><select aria-label="基准货币" value={currency} onChange={(e)=>setCurrency(e.target.value)}>{Object.keys(rates).map((code)=><option key={code}>{code}</option>)}</select></SettingRow><SettingRow title="时区" description="用于界面中的日期和时间"><select aria-label="时区" value={timezone} onChange={(e)=>setTimezone(e.target.value)}><option>Asia/Shanghai</option><option>Asia/Hong_Kong</option><option>America/New_York</option><option>Europe/London</option></select></SettingRow></div>}{tab==='notifications'&&<div className="settings-group"><h2>默认提醒</h2><SettingRow title="邮件通知" description="服务端会将到期提醒发送到登录邮箱"><span className="setting-value">已启用</span></SettingRow><div className="reminder-row"><div><strong>提前提醒</strong><small>新订阅默认使用，可在单项中覆盖</small></div><div className="reminder-chips">{[14,7,3,1].map((day)=><button aria-pressed={reminders.includes(day)} key={day} className={reminders.includes(day)?'active':''} onClick={()=>setReminders(reminders.includes(day)?reminders.filter((v)=>v!==day):[...reminders,day].sort((a,b)=>b-a))}>{day} 天</button>)}</div></div></div>}{tab==='security'&&<div className="settings-group"><h2>账户与安全</h2><SettingRow title="当前账户" description={userEmail||'已连接 Renuxa 服务端'}><span className="setting-value">已登录</span></SettingRow><SettingRow title="退出登录" description="此设备上的订阅数据将在再次登录后同步"><button className="secondary" onClick={onLogout}>退出登录</button></SettingRow></div>}</section></div></>;
+  const [notificationSettings,setNotificationSettings]=useState(defaultNotificationSettings);
+  const [telegramToken,setTelegramToken]=useState('');
+  const [smtpPassword,setSmtpPassword]=useState('');
+  const [saveState,setSaveState]=useState<'idle'|'saving'|'saved'|'error'>('idle');
+  const [saveError,setSaveError]=useState('');
+
+  useEffect(()=>{
+    if (!token) return;
+    apiRequest('/notification-settings',{},token)
+      .then((value)=>setNotificationSettings(value as NotificationSettings))
+      .catch(()=>setSaveError('通知设置加载失败'));
+  },[token]);
+
+  const updateNotificationSetting=<K extends keyof NotificationSettings,>(key:K,value:NotificationSettings[K])=>setNotificationSettings((current)=>({...current,[key]:value}));
+  const saveNotificationSettings=async(event:FormEvent)=>{
+    event.preventDefault();
+    if (!token) return;
+    setSaveState('saving'); setSaveError('');
+    try {
+      const saved=await apiRequest('/notification-settings',{method:'PUT',body:JSON.stringify({
+        telegram_enabled:notificationSettings.telegram_enabled,
+        telegram_bot_token:telegramToken||null,
+        telegram_chat_id:notificationSettings.telegram_chat_id,
+        email_enabled:notificationSettings.email_enabled,
+        smtp_host:notificationSettings.smtp_host,
+        smtp_port:notificationSettings.smtp_port,
+        smtp_tls:notificationSettings.smtp_tls,
+        smtp_from:notificationSettings.smtp_from,
+        smtp_username:notificationSettings.smtp_username,
+        smtp_password:smtpPassword||null,
+      })},token) as NotificationSettings;
+      setNotificationSettings(saved); setTelegramToken(''); setSmtpPassword(''); setSaveState('saved');
+    } catch(reason) {
+      setSaveState('error'); setSaveError(reason instanceof Error?reason.message:'保存失败');
+    }
+  };
+
+  return <><PageHeader eyebrow="PREFERENCES" title={t.settings} description={t.settingsDesc}/><div className="settings-layout"><nav className="settings-nav" aria-label="设置分类"><button className={tab==='general'?'active':''} onClick={()=>setTab('general')}><Globe2/>通用</button><button className={tab==='notifications'?'active':''} onClick={()=>setTab('notifications')}><Bell/>通知</button><button className={tab==='security'?'active':''} onClick={()=>setTab('security')}><ShieldCheck/>账户与安全</button></nav><section className="settings-content">{tab==='general'&&<div className="settings-group"><h2>显示与地区</h2><SettingRow title="界面语言" description="更改界面中的文字语言"><select aria-label="界面语言" value={locale} onChange={(e)=>setLocale(e.target.value as Locale)}><option value="zh-CN">简体中文</option><option value="en">English</option></select></SettingRow><SettingRow title="基准货币" description="仪表盘和统计的默认折算货币"><select aria-label="基准货币" value={currency} onChange={(e)=>setCurrency(e.target.value)}>{Object.keys(rates).map((code)=><option key={code}>{code}</option>)}</select></SettingRow><SettingRow title="时区" description="用于界面中的日期和时间"><select aria-label="时区" value={timezone} onChange={(e)=>setTimezone(e.target.value)}><option>Asia/Shanghai</option><option>Asia/Hong_Kong</option><option>America/New_York</option><option>Europe/London</option></select></SettingRow></div>}{tab==='notifications'&&<form className="settings-group" onSubmit={saveNotificationSettings}><h2>通知渠道</h2><SettingRow title="应用内通知" description="续费提醒始终保留在通知中心"><span className="setting-value">始终启用</span></SettingRow><div className="notification-channel"><div className="channel-heading"><span className="channel-icon telegram"><Send/></span><div><strong>Telegram</strong><small>通过机器人发送续费提醒</small></div><button type="button" className={`toggle ${notificationSettings.telegram_enabled?'on':''}`} aria-label="启用 Telegram" aria-pressed={notificationSettings.telegram_enabled} onClick={()=>updateNotificationSetting('telegram_enabled',!notificationSettings.telegram_enabled)}><span/></button></div>{notificationSettings.telegram_enabled&&<div className="channel-fields"><label className="field"><span>Bot Token</span><input type="password" autoComplete="new-password" value={telegramToken} onChange={(e)=>setTelegramToken(e.target.value)} placeholder={notificationSettings.telegram_bot_token_configured?'已配置，留空保持不变':'从 BotFather 获取'}/></label><label className="field"><span>Chat ID</span><input value={notificationSettings.telegram_chat_id} onChange={(e)=>updateNotificationSetting('telegram_chat_id',e.target.value)} placeholder="例如：123456789"/></label></div>}</div><div className="notification-channel"><div className="channel-heading"><span className="channel-icon email"><Mail/></span><div><strong>邮件</strong><small>使用自有 SMTP 服务发送到登录邮箱</small></div><button type="button" className={`toggle ${notificationSettings.email_enabled?'on':''}`} aria-label="启用邮件" aria-pressed={notificationSettings.email_enabled} onClick={()=>updateNotificationSetting('email_enabled',!notificationSettings.email_enabled)}><span/></button></div>{notificationSettings.email_enabled&&<div className="channel-fields smtp-fields"><label className="field"><span>SMTP 主机</span><input value={notificationSettings.smtp_host} onChange={(e)=>updateNotificationSetting('smtp_host',e.target.value)} placeholder="smtp.example.com"/></label><label className="field"><span>端口</span><input type="number" min="1" max="65535" value={notificationSettings.smtp_port} onChange={(e)=>updateNotificationSetting('smtp_port',Number(e.target.value))}/></label><label className="field span-2"><span>发件人</span><input value={notificationSettings.smtp_from} onChange={(e)=>updateNotificationSetting('smtp_from',e.target.value)} placeholder="Renuxa <notifications@example.com>"/></label><label className="field"><span>用户名</span><input autoComplete="username" value={notificationSettings.smtp_username} onChange={(e)=>updateNotificationSetting('smtp_username',e.target.value)}/></label><label className="field"><span>密码</span><input type="password" autoComplete="new-password" value={smtpPassword} onChange={(e)=>setSmtpPassword(e.target.value)} placeholder={notificationSettings.smtp_password_configured?'已配置，留空保持不变':'SMTP 密码或密钥'}/></label><label className="tls-option"><input type="checkbox" checked={notificationSettings.smtp_tls} onChange={(e)=>updateNotificationSetting('smtp_tls',e.target.checked)}/><span>启用 TLS 加密连接</span></label></div>}</div><div className="reminder-row"><div><strong>提前提醒</strong><small>新订阅默认使用，可在单项中覆盖</small></div><div className="reminder-chips">{[14,7,3,1].map((day)=><button type="button" aria-pressed={reminders.includes(day)} key={day} className={reminders.includes(day)?'active':''} onClick={()=>setReminders(reminders.includes(day)?reminders.filter((v)=>v!==day):[...reminders,day].sort((a,b)=>b-a))}>{day} 天</button>)}</div></div><div className="settings-actions"><span className={saveState==='error'?'save-error':'save-status'}>{saveError||(saveState==='saved'?'设置已保存':'')}</span><button className="primary" disabled={!token||saveState==='saving'}>{saveState==='saving'?<RefreshCw className="spin"/>:<Check/>}保存设置</button></div></form>}{tab==='security'&&<div className="settings-group"><h2>账户与安全</h2><SettingRow title="当前账户" description={userEmail||'已连接 Renuxa 服务端'}><span className="setting-value">已登录</span></SettingRow><SettingRow title="退出登录" description="此设备上的订阅数据将在再次登录后同步"><button className="secondary" onClick={onLogout}>退出登录</button></SettingRow></div>}</section></div></>;
 }
 
 function SettingRow({ title, description, children }: { title:string; description:string; children:React.ReactNode }) { return <div className="setting-row"><div><strong>{title}</strong><small>{description}</small></div>{children}</div>; }

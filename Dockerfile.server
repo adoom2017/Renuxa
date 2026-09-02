@@ -16,6 +16,7 @@ COPY server ./server
 RUN --mount=type=cache,id=renuxa-cargo-registry,target=/usr/local/cargo/registry \
     --mount=type=cache,id=renuxa-cargo-git,target=/usr/local/cargo/git \
     --mount=type=cache,id=renuxa-target-${TARGETARCH},target=/app/target \
+    touch server/src/lib.rs server/src/main.rs server/src/bin/worker.rs && \
     cargo build --locked --release -p renuxa-server --bins && \
     cp /app/target/release/renuxa-server /tmp/renuxa-server && \
     cp /app/target/release/worker /tmp/renuxa-worker

@@ -90,35 +90,19 @@ docker compose -f docker-compose.build.yml up --build -d
 
 ### 通知渠道
 
-`NOTIFICATION_CHANNELS` 使用逗号分隔启用的渠道，可选值为 `in_app`、`telegram` 和 `email`。应用内通知默认启用；Telegram 是推荐的外部提醒渠道：
+通知渠道由每位用户登录后在“设置 → 通知”中配置，不需要在服务器 `.env` 中保存 Telegram 或 SMTP 凭据。应用内通知始终启用，Telegram 和邮件可分别开启。
 
-```dotenv
-NOTIFICATION_CHANNELS=in_app,telegram
-TELEGRAM_BOT_TOKEN=123456789:replace-with-bot-token
-TELEGRAM_CHAT_ID=replace-with-chat-id
-```
+Telegram 需要填写从 BotFather 获取的 Bot Token，以及接收提醒的 Chat ID。每个账户保存独立配置，提醒只会发送到该账户设置的会话。
 
-当前 Telegram 配置面向单用户或家庭自托管部署，所有 Telegram 提醒都会发送到同一个 `TELEGRAM_CHAT_ID`。
+邮件是可选渠道。启用时在页面填写 SMTP 主机、端口、TLS、发件人、用户名和密码。Bot Token 与 SMTP 密码写入后不会通过读取接口返回到浏览器；留空保存会保留已配置的密钥。
 
-邮件是可选渠道。使用外部 SMTP 时，将 `email` 加入渠道并配置服务商凭据：
-
-```dotenv
-NOTIFICATION_CHANNELS=in_app,telegram,email
-SMTP_HOST=smtp.example.com
-SMTP_PORT=587
-SMTP_TLS=true
-SMTP_FROM=Renuxa <notifications@mail.example.com>
-SMTP_USERNAME=replace-with-smtp-username
-SMTP_PASSWORD=replace-with-smtp-password
-```
-
-Mailpit 只用于本地测试邮件，不会向真实邮箱投递。需要时在 `.env` 中设置 `SMTP_HOST=mailpit`、`SMTP_PORT=1025`、`SMTP_TLS=false`，并通过 `mail` profile 启动：
+Mailpit 只用于本地测试邮件，不会向真实邮箱投递。需要时通过 `mail` profile 启动，然后在通知设置中填写主机 `mailpit`、端口 `1025` 并关闭 TLS：
 
 ```bash
 docker compose -f docker-compose.build.yml --profile mail up --build -d
 ```
 
-未启用 `email` 时无需配置 SMTP，也无需启动 Mailpit。
+未启用邮件时无需安装或启动 Mailpit。
 
 ### 常用命令
 

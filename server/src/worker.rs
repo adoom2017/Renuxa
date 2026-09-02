@@ -5,7 +5,6 @@ use lettre::{
     transport::smtp::authentication::Credentials,
 };
 use sqlx::Row;
-use std::{collections::HashSet, env};
 use uuid::Uuid;
 
 pub async fn run_cycle(state: &AppState) -> Result<(), sqlx::Error> {
@@ -25,7 +24,21 @@ pub async fn run_cycle(state: &AppState) -> Result<(), sqlx::Error> {
             .bind(format!("reminder:{id}:{due}:{days}"))
             .fetch_optional(&mut *tx).await?;
         if let Some(notification_id) = notification_id {
-            for channel in notification_channels() {
+            let settings: Option<(bool, bool)> = sqlx::query_as(
+                "SELECT telegram_enabled,email_enabled FROM notification_settings WHERE user_id=$1",
+            )
+            .bind(user_id)
+            .fetch_optional(&mut *tx)
+            .await?;
+            let (telegram_enabled, email_enabled) = settings.unwrap_or_default();
+            let mut channels = vec!["in_app"];
+            if telegram_enabled {
+                channels.push("telegram");
+            }
+            if email_enabled {
+                channels.push("email");
+            }
+            for channel in channels {
                 sqlx::query("INSERT INTO notification_deliveries (notification_id,channel,status,next_attempt_at) VALUES ($1,$2,'pending',now())")
                     .bind(notification_id).bind(channel).execute(&mut *tx).await?;
             }
@@ -66,21 +79,6 @@ pub async fn run_cycle(state: &AppState) -> Result<(), sqlx::Error> {
     deliver_telegram(state).await;
     sync_rates(state).await;
     Ok(())
-}
-
-fn notification_channels() -> HashSet<String> {
-    parse_notification_channels(
-        &env::var("NOTIFICATION_CHANNELS").unwrap_or_else(|_| "in_app".into()),
-    )
-}
-
-fn parse_notification_channels(value: &str) -> HashSet<String> {
-    value
-        .split(',')
-        .map(str::trim)
-        .filter(|channel| matches!(*channel, "in_app" | "email" | "telegram"))
-        .map(str::to_owned)
-        .collect()
 }
 
 async fn sync_rates(state: &AppState) {
@@ -127,43 +125,38 @@ async fn sync_rates(state: &AppState) {
 }
 
 async fn deliver_email(state: &AppState) {
-    if !notification_channels().contains("email") {
-        return;
-    }
-    let Ok(host) = env::var("SMTP_HOST") else {
-        return;
-    };
-    let from =
-        env::var("SMTP_FROM").unwrap_or_else(|_| "Renuxa <notifications@renuxa.local>".into());
-    let mut builder = if env::var("SMTP_TLS").as_deref() == Ok("true") {
-        let Ok(builder) = AsyncSmtpTransport::<Tokio1Executor>::relay(&host) else {
-            return;
-        };
-        builder
-    } else {
-        AsyncSmtpTransport::<Tokio1Executor>::builder_dangerous(&host)
-    };
-    if let (Ok(username), Ok(password)) = (env::var("SMTP_USERNAME"), env::var("SMTP_PASSWORD"))
-        && !username.is_empty()
-    {
-        builder = builder.credentials(Credentials::new(username, password));
-    }
-    let mailer = builder
-        .port(
-            env::var("SMTP_PORT")
-                .ok()
-                .and_then(|value| value.parse().ok())
-                .unwrap_or(587),
-        )
-        .build();
-    let rows = match sqlx::query("SELECT d.id,u.email,n.title,n.body FROM notification_deliveries d JOIN notifications n ON n.id=d.notification_id JOIN users u ON u.id=n.user_id WHERE d.channel='email' AND d.status='pending' AND d.next_attempt_at<=now() ORDER BY d.created_at FOR UPDATE SKIP LOCKED LIMIT 50")
+    let rows = match sqlx::query("SELECT d.id,u.email,n.title,n.body,s.smtp_host,s.smtp_port,s.smtp_tls,s.smtp_from,s.smtp_username,s.smtp_password FROM notification_deliveries d JOIN notifications n ON n.id=d.notification_id JOIN users u ON u.id=n.user_id JOIN notification_settings s ON s.user_id=n.user_id WHERE d.channel='email' AND d.status='pending' AND d.next_attempt_at<=now() AND s.email_enabled ORDER BY d.created_at FOR UPDATE OF d SKIP LOCKED LIMIT 50")
         .fetch_all(&state.db).await { Ok(rows) => rows, Err(_) => return };
     for row in rows {
         let delivery_id: Uuid = row.get("id");
+        let host: String = row.get("smtp_host");
+        let mut builder = if row.get("smtp_tls") {
+            match AsyncSmtpTransport::<Tokio1Executor>::relay(&host) {
+                Ok(builder) => builder,
+                Err(_) => {
+                    record_delivery_result(state, delivery_id, false).await;
+                    continue;
+                }
+            }
+        } else {
+            AsyncSmtpTransport::<Tokio1Executor>::builder_dangerous(&host)
+        };
+        let username: String = row.get("smtp_username");
+        if !username.is_empty() {
+            builder = builder.credentials(Credentials::new(
+                username,
+                row.get::<Option<String>, _>("smtp_password")
+                    .unwrap_or_default(),
+            ));
+        }
+        let mailer = builder.port(row.get::<i32, _>("smtp_port") as u16).build();
         let message = Message::builder()
-            .from(match from.parse() {
+            .from(match row.get::<String, _>("smtp_from").parse() {
                 Ok(value) => value,
-                Err(_) => return,
+                Err(_) => {
+                    record_delivery_result(state, delivery_id, false).await;
+                    continue;
+                }
             })
             .to(match row.get::<String, _>("email").parse() {
                 Ok(value) => value,
@@ -175,33 +168,22 @@ async fn deliver_email(state: &AppState) {
             Ok(message) => mailer.send(message).await.is_ok(),
             Err(_) => false,
         };
-        if sent {
-            let _ = sqlx::query("UPDATE notification_deliveries SET status='sent',attempts=attempts+1,updated_at=now() WHERE id=$1").bind(delivery_id).execute(&state.db).await;
-        } else {
-            let _ = sqlx::query("UPDATE notification_deliveries SET attempts=attempts+1,next_attempt_at=now()+(interval '1 minute'*least(60,power(2,attempts+1))),updated_at=now() WHERE id=$1").bind(delivery_id).execute(&state.db).await;
-        }
+        record_delivery_result(state, delivery_id, sent).await;
     }
 }
 
 async fn deliver_telegram(state: &AppState) {
-    if !notification_channels().contains("telegram") {
-        return;
-    }
-    let (Ok(token), Ok(chat_id)) = (env::var("TELEGRAM_BOT_TOKEN"), env::var("TELEGRAM_CHAT_ID"))
-    else {
-        return;
-    };
-    if token.is_empty() || chat_id.is_empty() {
-        return;
-    }
-
-    let rows = match sqlx::query("SELECT d.id,n.title,n.body FROM notification_deliveries d JOIN notifications n ON n.id=d.notification_id WHERE d.channel='telegram' AND d.status='pending' AND d.next_attempt_at<=now() ORDER BY d.created_at FOR UPDATE SKIP LOCKED LIMIT 50")
+    let rows = match sqlx::query("SELECT d.id,n.title,n.body,s.telegram_bot_token,s.telegram_chat_id FROM notification_deliveries d JOIN notifications n ON n.id=d.notification_id JOIN notification_settings s ON s.user_id=n.user_id WHERE d.channel='telegram' AND d.status='pending' AND d.next_attempt_at<=now() AND s.telegram_enabled ORDER BY d.created_at FOR UPDATE OF d SKIP LOCKED LIMIT 50")
         .fetch_all(&state.db).await { Ok(rows) => rows, Err(_) => return };
-    let endpoint = format!("https://api.telegram.org/bot{token}/sendMessage");
     for row in rows {
         let delivery_id: Uuid = row.get("id");
         let title: String = row.get("title");
         let body: String = row.get("body");
+        let token: String = row
+            .get::<Option<String>, _>("telegram_bot_token")
+            .unwrap_or_default();
+        let chat_id: String = row.get("telegram_chat_id");
+        let endpoint = format!("https://api.telegram.org/bot{token}/sendMessage");
         let sent = state
             .http
             .post(&endpoint)
@@ -212,11 +194,15 @@ async fn deliver_telegram(state: &AppState) {
             .send()
             .await
             .is_ok_and(|response| response.status().is_success());
-        if sent {
-            let _ = sqlx::query("UPDATE notification_deliveries SET status='sent',attempts=attempts+1,updated_at=now() WHERE id=$1").bind(delivery_id).execute(&state.db).await;
-        } else {
-            let _ = sqlx::query("UPDATE notification_deliveries SET attempts=attempts+1,next_attempt_at=now()+(interval '1 minute'*least(60,power(2,attempts+1))),updated_at=now() WHERE id=$1").bind(delivery_id).execute(&state.db).await;
-        }
+        record_delivery_result(state, delivery_id, sent).await;
+    }
+}
+
+async fn record_delivery_result(state: &AppState, delivery_id: Uuid, sent: bool) {
+    if sent {
+        let _ = sqlx::query("UPDATE notification_deliveries SET status='sent',attempts=attempts+1,updated_at=now() WHERE id=$1").bind(delivery_id).execute(&state.db).await;
+    } else {
+        let _ = sqlx::query("UPDATE notification_deliveries SET attempts=attempts+1,next_attempt_at=now()+(interval '1 minute'*least(60,power(2,attempts+1))),updated_at=now() WHERE id=$1").bind(delivery_id).execute(&state.db).await;
     }
 }
 
@@ -245,18 +231,6 @@ fn anchored_month(date: NaiveDate, months: i32, anchor: i16) -> NaiveDate {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn parses_notification_channels() {
-        assert_eq!(
-            parse_notification_channels("in_app, telegram,unknown,email,telegram"),
-            HashSet::from([
-                "in_app".to_string(),
-                "telegram".to_string(),
-                "email".to_string(),
-            ])
-        );
-    }
 
     #[test]
     fn keeps_month_anchor() {

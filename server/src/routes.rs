@@ -35,6 +35,10 @@ pub fn router() -> Router<AppState> {
         .route("/bills/{id}", patch(update_bill))
         .route("/notifications", get(list_notifications))
         .route("/notifications/{id}/read", post(mark_notification_read))
+        .route(
+            "/notification-settings",
+            get(get_notification_settings).put(update_notification_settings),
+        )
         .route("/icons/search", get(search_icons))
         .route("/exchange-rates", get(exchange_rates))
         .route("/dashboard", get(dashboard))
@@ -87,7 +91,7 @@ async fn login(
     .bind(&input.email)
     .fetch_optional(&state.db)
     .await?;
-    let (id, email, hash) = row
+    let (id, email, _hash) = row
         .filter(|r| verify_password(&r.2, &input.password))
         .ok_or(ApiError::Unauthorized)?;
     Ok(Json(AuthResponse {
@@ -217,6 +221,73 @@ async fn mark_notification_read(
         .execute(&state.db)
         .await?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+async fn get_notification_settings(
+    user: CurrentUser,
+    State(state): State<AppState>,
+) -> Result<Json<NotificationSettings>, ApiError> {
+    let settings = sqlx::query_as::<_, NotificationSettings>(
+        "SELECT telegram_enabled,coalesce(length(telegram_bot_token)>0,false) telegram_bot_token_configured,telegram_chat_id,email_enabled,smtp_host,smtp_port,smtp_tls,smtp_from,smtp_username,coalesce(length(smtp_password)>0,false) smtp_password_configured FROM notification_settings WHERE user_id=$1",
+    )
+    .bind(user.0)
+    .fetch_optional(&state.db)
+    .await?
+    .unwrap_or_default();
+    Ok(Json(settings))
+}
+
+async fn update_notification_settings(
+    user: CurrentUser,
+    State(state): State<AppState>,
+    Json(input): Json<UpdateNotificationSettings>,
+) -> Result<Json<NotificationSettings>, ApiError> {
+    if !(1..=65535).contains(&input.smtp_port) {
+        return Err(ApiError::Validation(
+            "SMTP 端口必须在 1 到 65535 之间".into(),
+        ));
+    }
+    let existing: Option<(bool, bool)> = sqlx::query_as(
+        "SELECT coalesce(length(telegram_bot_token)>0,false),coalesce(length(smtp_password)>0,false) FROM notification_settings WHERE user_id=$1",
+    )
+    .bind(user.0)
+    .fetch_optional(&state.db)
+    .await?;
+    let has_telegram_token = input
+        .telegram_bot_token
+        .as_deref()
+        .is_some_and(|value| !value.trim().is_empty())
+        || existing.is_some_and(|value| value.0);
+    if input.telegram_enabled && (!has_telegram_token || input.telegram_chat_id.trim().is_empty()) {
+        return Err(ApiError::Validation(
+            "启用 Telegram 前需要填写 Bot Token 和 Chat ID".into(),
+        ));
+    }
+    if input.email_enabled
+        && (input.smtp_host.trim().is_empty()
+            || input.smtp_from.trim().is_empty()
+            || input.smtp_from.parse::<lettre::message::Mailbox>().is_err())
+    {
+        return Err(ApiError::Validation(
+            "启用邮件前需要填写有效的 SMTP 主机和发件人".into(),
+        ));
+    }
+
+    sqlx::query("INSERT INTO notification_settings (user_id,telegram_enabled,telegram_bot_token,telegram_chat_id,email_enabled,smtp_host,smtp_port,smtp_tls,smtp_from,smtp_username,smtp_password) VALUES ($1,$2,nullif($3,''),$4,$5,$6,$7,$8,$9,$10,nullif($11,'')) ON CONFLICT (user_id) DO UPDATE SET telegram_enabled=excluded.telegram_enabled,telegram_bot_token=coalesce(excluded.telegram_bot_token,notification_settings.telegram_bot_token),telegram_chat_id=excluded.telegram_chat_id,email_enabled=excluded.email_enabled,smtp_host=excluded.smtp_host,smtp_port=excluded.smtp_port,smtp_tls=excluded.smtp_tls,smtp_from=excluded.smtp_from,smtp_username=excluded.smtp_username,smtp_password=coalesce(excluded.smtp_password,notification_settings.smtp_password),updated_at=now()")
+        .bind(user.0)
+        .bind(input.telegram_enabled)
+        .bind(input.telegram_bot_token.unwrap_or_default().trim().to_owned())
+        .bind(input.telegram_chat_id.trim())
+        .bind(input.email_enabled)
+        .bind(input.smtp_host.trim())
+        .bind(input.smtp_port)
+        .bind(input.smtp_tls)
+        .bind(input.smtp_from.trim())
+        .bind(input.smtp_username.trim())
+        .bind(input.smtp_password.unwrap_or_default())
+        .execute(&state.db)
+        .await?;
+    get_notification_settings(user, State(state)).await
 }
 
 #[derive(Deserialize)]

@@ -1,9 +1,6 @@
 use crate::{AppState, error::ApiError};
 use argon2::{Argon2, PasswordHash, PasswordVerifier};
-use axum::{
-    extract::{FromRequestParts, State},
-    http::request::Parts,
-};
+use axum::{extract::FromRequestParts, http::request::Parts};
 use chrono::{Duration, Utc};
 use jsonwebtoken::{DecodingKey, EncodingKey, Header, Validation, decode, encode};
 use serde::{Deserialize, Serialize};
