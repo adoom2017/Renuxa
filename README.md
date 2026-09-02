@@ -84,6 +84,24 @@ docker compose -f docker-compose.build.yml up --build -d
 
 默认部署版本为 `0.1.0`。升级时可在 `.env` 中设置 `RENUXA_VERSION`，再重新拉取并启动。
 
+### 发布 Docker 镜像
+
+Docker Hub 镜像由 GitHub Actions 构建，本地不需要保留 AMD64 虚拟机或手动运行多架构构建。首次使用前，在 GitHub 仓库的 `Settings → Secrets and variables → Actions` 中添加：
+
+| Secret | 内容 |
+| --- | --- |
+| `DOCKERHUB_USERNAME` | Docker Hub 用户名 `adoom2018` |
+| `DOCKERHUB_TOKEN` | Docker Hub 中创建的具有 Read & Write 权限的 Access Token |
+
+发布版本时创建并推送语义化版本标签：
+
+```bash
+git tag v0.1.1
+git push origin v0.1.1
+```
+
+工作流会并行构建 `adoom2018/renuxa-web` 和 `adoom2018/renuxa-server`，分别发布 `linux/amd64`、`linux/arm64` 的 `0.1.1` 与 `latest` 标签。也可以在 GitHub 的 Actions 页面选择 `Publish Docker images`，手动输入版本号运行。
+
 正式的 `docker-compose.yml` 只向宿主机暴露 Web 端口 `3000`。API 和 PostgreSQL 仅在 Compose 内部网络通信；可选的 Mailpit 同样不对外开放。生产环境建议通过 HTTPS 反向代理暴露 Web。
 
 本地调试使用 `docker-compose.build.yml`，该配置额外暴露 API 的 `8080`、Mailpit Web 的 `8025` 和 SMTP 的 `1025` 端口。
