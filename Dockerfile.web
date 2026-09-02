@@ -9,7 +9,7 @@ RUN --mount=type=cache,id=renuxa-npm,target=/root/.npm npm ci
 COPY app ./app
 COPY desktop ./desktop
 COPY public ./public
-COPY tsconfig.json next-env.d.ts vite.desktop.config.ts ./
+COPY tsconfig.json vite.desktop.config.ts ./
 
 ARG VITE_API_URL=/api
 ENV VITE_API_URL=${VITE_API_URL}
