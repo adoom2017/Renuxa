@@ -13,7 +13,7 @@ npm run dev
 
 ## Docker Compose 一键启动
 
-Docker Compose 会启动 Web、API、Worker、PostgreSQL 和 Mailpit。数据库迁移由 API 启动时自动执行。
+Docker Compose 默认启动 Web、API、Worker 和 PostgreSQL；Mailpit 是通过 `mail` profile 启用的可选本地测试服务。数据库迁移由 API 启动时自动执行。
 
 ### macOS（Colima）
 
@@ -84,9 +84,41 @@ docker compose -f docker-compose.build.yml up --build -d
 
 默认部署版本为 `0.1.0`。升级时可在 `.env` 中设置 `RENUXA_VERSION`，再重新拉取并启动。
 
-正式的 `docker-compose.yml` 只向宿主机暴露 Web 端口 `3000`。API、PostgreSQL 和 Mailpit 仅在 Compose 内部网络通信，无需开放对应的防火墙端口。生产环境建议通过 HTTPS 反向代理暴露 Web。
+正式的 `docker-compose.yml` 只向宿主机暴露 Web 端口 `3000`。API 和 PostgreSQL 仅在 Compose 内部网络通信；可选的 Mailpit 同样不对外开放。生产环境建议通过 HTTPS 反向代理暴露 Web。
 
 本地调试使用 `docker-compose.build.yml`，该配置额外暴露 API 的 `8080`、Mailpit Web 的 `8025` 和 SMTP 的 `1025` 端口。
+
+### 通知渠道
+
+`NOTIFICATION_CHANNELS` 使用逗号分隔启用的渠道，可选值为 `in_app`、`telegram` 和 `email`。应用内通知默认启用；Telegram 是推荐的外部提醒渠道：
+
+```dotenv
+NOTIFICATION_CHANNELS=in_app,telegram
+TELEGRAM_BOT_TOKEN=123456789:replace-with-bot-token
+TELEGRAM_CHAT_ID=replace-with-chat-id
+```
+
+当前 Telegram 配置面向单用户或家庭自托管部署，所有 Telegram 提醒都会发送到同一个 `TELEGRAM_CHAT_ID`。
+
+邮件是可选渠道。使用外部 SMTP 时，将 `email` 加入渠道并配置服务商凭据：
+
+```dotenv
+NOTIFICATION_CHANNELS=in_app,telegram,email
+SMTP_HOST=smtp.example.com
+SMTP_PORT=587
+SMTP_TLS=true
+SMTP_FROM=Renuxa <notifications@mail.example.com>
+SMTP_USERNAME=replace-with-smtp-username
+SMTP_PASSWORD=replace-with-smtp-password
+```
+
+Mailpit 只用于本地测试邮件，不会向真实邮箱投递。需要时在 `.env` 中设置 `SMTP_HOST=mailpit`、`SMTP_PORT=1025`、`SMTP_TLS=false`，并通过 `mail` profile 启动：
+
+```bash
+docker compose -f docker-compose.build.yml --profile mail up --build -d
+```
+
+未启用 `email` 时无需配置 SMTP，也无需启动 Mailpit。
 
 ### 常用命令
 
@@ -104,8 +136,11 @@ docker compose down
 docker compose pull
 docker compose up -d
 
-# 使用本地源码构建并后台启动
+# 使用本地源码构建并后台启动（不安装 Mailpit）
 docker compose -f docker-compose.build.yml up --build -d
+
+# 本地构建并安装 Mailpit 测试邮件
+docker compose -f docker-compose.build.yml --profile mail up --build -d
 ```
 
 服务默认地址：
@@ -114,7 +149,7 @@ docker compose -f docker-compose.build.yml up --build -d
 | --- | --- | --- |
 | Web | `http://127.0.0.1:3000` | Renuxa Web 界面 |
 | API（本地构建配置） | `http://127.0.0.1:8080` | Rust API 与健康检查 |
-| Mailpit（本地构建配置） | `http://127.0.0.1:8025` | 查看开发环境邮件 |
+| Mailpit（本地构建且启用 `mail` profile） | `http://127.0.0.1:8025` | 查看开发环境邮件 |
 
 ## 桌面开发
 
@@ -127,7 +162,7 @@ npm run desktop:dev
 - `app/`：Web 和 Tauri 共用的产品界面
 - `server/`：Axum API、SQLx 迁移与后台 Worker
 - `src-tauri/`：macOS/Windows 桌面应用配置
-- `docker-compose.yml`：Web、PostgreSQL、API、Worker 与开发邮件服务
+- `docker-compose.yml`：使用预构建镜像部署 Web、PostgreSQL、API、Worker 和可选 Mailpit
 - `docker-compose.build.yml`：使用本地 Dockerfile 构建 Web、API 和 Worker
 
 ## 生产配置
