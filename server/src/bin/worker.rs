@@ -16,7 +16,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         jwt_secret: Arc::from(
             env::var("JWT_SECRET").unwrap_or_else(|_| "development-only-change-me".into()),
         ),
-        http: reqwest::Client::new(),
+        http: reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .build()?,
     };
     loop {
         if let Err(error) = worker::run_cycle(&state).await {

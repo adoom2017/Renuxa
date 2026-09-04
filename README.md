@@ -82,7 +82,7 @@ docker compose up -d
 docker compose -f docker-compose.build.yml up --build -d
 ```
 
-默认部署版本为 `0.1.0`。升级时可在 `.env` 中设置 `RENUXA_VERSION`，再重新拉取并启动。
+默认部署版本为 `0.1.2`。升级时可在 `.env` 中设置 `RENUXA_VERSION`，再重新拉取并启动。
 
 ### 发布 Docker 镜像
 

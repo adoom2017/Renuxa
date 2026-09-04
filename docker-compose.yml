@@ -1,9 +1,9 @@
 x-server-image: &server-image
-  image: adoom2018/renuxa-server:${RENUXA_VERSION:-0.1.0}
+  image: adoom2018/renuxa-server:${RENUXA_VERSION:-0.1.2}
 
 services:
   web:
-    image: adoom2018/renuxa-web:${RENUXA_VERSION:-0.1.0}
+    image: adoom2018/renuxa-web:${RENUXA_VERSION:-0.1.2}
     restart: unless-stopped
     init: true
     ports: ["3000:80"]

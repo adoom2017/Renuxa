@@ -27,7 +27,9 @@ async fn main() -> anyhowless::Result<()> {
         jwt_secret: Arc::from(
             env::var("JWT_SECRET").unwrap_or_else(|_| "development-only-change-me".into()),
         ),
-        http: reqwest::Client::new(),
+        http: reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .build()?,
     };
     let addr = env::var("BIND_ADDR").unwrap_or_else(|_| "0.0.0.0:8080".into());
     let listener = TcpListener::bind(&addr).await?;

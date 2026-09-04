@@ -114,6 +114,26 @@ function money(amount: number, currency: string) {
   return `${currencySymbols[currency] ?? `${currency} `}${amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
+function iconSource(iconUrl?: string) {
+  if (!iconUrl || !apiUrl) return iconUrl;
+  try {
+    const url = new URL(iconUrl);
+    if (url.protocol === 'https:' && (url.hostname === 'mzstatic.com' || url.hostname.endsWith('.mzstatic.com'))) {
+      return `${apiUrl}/icons/image?url=${encodeURIComponent(iconUrl)}`;
+    }
+  } catch {}
+  return iconUrl;
+}
+
+function ServiceIconImage({ source, fallback }: { source: string; fallback: string }) {
+  const [failed, setFailed] = useState(false);
+  if (failed) return fallback;
+  return <>
+    {/* eslint-disable-next-line @next/next/no-img-element */}
+    <img src={source} alt="" width={56} height={56} onError={() => setFailed(true)} />
+  </>;
+}
+
 function addBillingMonths(date: Date, months: number) {
   const day = date.getDate();
   const result = new Date(date.getFullYear(), date.getMonth() + months, 1);
@@ -140,9 +160,10 @@ function scheduledSpend(subscriptions: Subscription[], start: Date, end: Date) {
 }
 
 function ServiceIcon({ item, size = 'normal' }: { item: Pick<Subscription, 'name' | 'color' | 'iconUrl'>; size?: 'normal' | 'large' }) {
+  const source = iconSource(item.iconUrl);
+  const fallback = item.name.slice(0, 1).toUpperCase();
   return <span className={`service-icon ${size === 'large' ? 'large' : ''}`} style={{ background: item.color }}>
-    {/* eslint-disable-next-line @next/next/no-img-element */}
-    {item.iconUrl ? <img src={item.iconUrl} alt="" width={56} height={56} /> : item.name.slice(0, 1).toUpperCase()}
+    {source ? <ServiceIconImage key={source} source={source} fallback={fallback} /> : fallback}
   </span>;
 }
 
@@ -377,7 +398,7 @@ function SettingRow({ title, description, children }: { title:string; descriptio
 
 function AddSubscriptionModal({ locale, onClose, onSave }: { locale:Locale; onClose:()=>void; onSave:(sub:Subscription)=>void }) {
   const [name,setName]=useState(''); const [plan,setPlan]=useState(''); const [amount,setAmount]=useState(''); const [currency,setCurrency]=useState('CNY'); const [cadence,setCadence]=useState('monthly'); const [nextDate,setNextDate]=useState('2026-09-30'); const [category,setCategory]=useState('工作效率'); const [iconUrl,setIconUrl]=useState(''); const [iconBusy,setIconBusy]=useState(false); const [reminders,setReminders]=useState<number[]>(()=>{try{return JSON.parse(localStorage.getItem('renuxa.reminders')??'[7,3,1]')}catch{return [7,3,1]}});
-  const searchIcon=async()=>{ if(!name.trim())return; setIconBusy(true); try { const response=await fetch(`https://itunes.apple.com/search?term=${encodeURIComponent(name)}&entity=software&limit=1&country=cn`); const data=await response.json(); setIconUrl(data.results?.[0]?.artworkUrl100??''); } catch {} finally { setIconBusy(false); } };
+  const searchIcon=async()=>{ if(!name.trim())return; setIconBusy(true); try { const results=await apiRequest(`/icons/search?q=${encodeURIComponent(name)}&country=cn`); setIconUrl(results?.[0]?.icon_url??''); } catch {} finally { setIconBusy(false); } };
   const submit=(event:FormEvent)=>{event.preventDefault(); const numeric=Number(amount); if(!name.trim()||!Number.isFinite(numeric)||numeric<0)return; onSave({id:crypto.randomUUID(),name:name.trim(),plan:plan.trim()||'标准方案',amount:numeric,currency,cadence,nextDate,category,status:'active',color:colors[name.length%colors.length],iconUrl:iconUrl||undefined,reminderOffsets:reminders});};
   return <div className="modal-backdrop" role="presentation" onMouseDown={(e)=>{if(e.currentTarget===e.target)onClose();}}><section className="modal" role="dialog" aria-modal="true" aria-labelledby="add-title"><header><div><p>NEW SUBSCRIPTION</p><h2 id="add-title">{locale==='zh-CN'?'添加订阅':'Add subscription'}</h2></div><button onClick={onClose} aria-label="关闭"><X/></button></header><form onSubmit={submit}><div className="icon-name-row"><ServiceIcon size="large" item={{name:name||'?',color:colors[name.length%colors.length],iconUrl:iconUrl||undefined}}/><label className="field grow"><span>订阅名称</span><div className="input-with-action"><input autoFocus required value={name} onChange={(e)=>setName(e.target.value)} onBlur={searchIcon} placeholder="例如：Spotify"/><button type="button" onClick={searchIcon} title="从 App Store 匹配图标">{iconBusy?<RefreshCw className="spin"/>:<Search/>}</button></div></label></div><div className="form-grid"><label className="field span-2"><span>方案名称</span><input value={plan} onChange={(e)=>setPlan(e.target.value)} placeholder="例如：个人高级版"/></label><label className="field"><span>金额</span><input required inputMode="decimal" value={amount} onChange={(e)=>setAmount(e.target.value)} placeholder="0.00"/></label><label className="field"><span>货币</span><select value={currency} onChange={(e)=>setCurrency(e.target.value)}>{Object.keys(rates).map((code)=><option key={code}>{code}</option>)}</select></label><label className="field"><span>扣费周期</span><select value={cadence} onChange={(e)=>setCadence(e.target.value)}><option value="monthly">每月</option><option value="quarterly">每季度</option><option value="yearly">每年</option></select></label><label className="field"><span>下次续费</span><input type="date" required value={nextDate} onChange={(e)=>setNextDate(e.target.value)}/></label><label className="field span-2"><span>分类</span><select value={category} onChange={(e)=>setCategory(e.target.value)}><option>工作效率</option><option>影音娱乐</option><option>云服务</option><option>学习教育</option><option>健康生活</option><option>其他</option></select></label></div><div className="reminder-config"><span><Bell size={15}/>提前提醒</span><div>{[14,7,3,1].map((day)=><button type="button" key={day} className={reminders.includes(day)?'active':''} onClick={()=>setReminders(reminders.includes(day)?reminders.filter((v)=>v!==day):[...reminders,day])}>{day} 天</button>)}</div></div><footer><button className="secondary" type="button" onClick={onClose}>取消</button><button className="primary" type="submit"><Plus size={16}/>添加订阅</button></footer></form></section></div>;
 }
