@@ -402,8 +402,32 @@ function SettingRow({ title, description, children }: { title:string; descriptio
 function AddSubscriptionModal({ locale, onClose, onSave }: { locale:Locale; onClose:()=>void; onSave:(sub:Subscription)=>Promise<void> }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [iconCandidates, setIconCandidates] = useState<{name:string; developer:string; icon_url:string; bundle_id:string}[]>([]);
+  const [iconMessage, setIconMessage] = useState('');
+  const iconSearch = useRef({ version: 0, query: '' });
   const [name,setName]=useState(''); const [plan,setPlan]=useState(''); const [amount,setAmount]=useState(''); const [currency,setCurrency]=useState('CNY'); const [cadence,setCadence]=useState('monthly'); const [nextDate,setNextDate]=useState('2026-09-30'); const [category,setCategory]=useState('工作效率'); const [iconUrl,setIconUrl]=useState(''); const [iconBusy,setIconBusy]=useState(false); const [reminders,setReminders]=useState<number[]>(()=>{try{return JSON.parse(localStorage.getItem('renuxa.reminders')??'[7,3,1]')}catch{return [7,3,1]}});
-  const searchIcon=async()=>{ if(!name.trim())return; setIconBusy(true); try { const results=await apiRequest(`/icons/search?q=${encodeURIComponent(name)}&country=cn`); setIconUrl(results?.[0]?.icon_url??''); } catch {} finally { setIconBusy(false); } };
+  const changeName = (value: string) => {
+    setName(value);
+    iconSearch.current = { version: iconSearch.current.version + 1, query: '' };
+    setIconCandidates([]);setIconUrl('');setIconMessage('');setIconBusy(false);
+  };
+  const searchIcon=async()=>{
+    const query = name.trim();
+    if(!query || iconSearch.current.query === query)return;
+    const version = ++iconSearch.current.version;
+    iconSearch.current.query = query;
+    setIconBusy(true);setIconMessage('');
+    try {
+      const results = await apiRequest(`/icons/search?q=${encodeURIComponent(query)}&country=cn`);
+      if (version !== iconSearch.current.version) return;
+      setIconCandidates(results);setIconUrl(results[0]?.icon_url ?? '');
+      if (!results.length) setIconMessage('未找到匹配图标');
+    } catch {
+      if (version !== iconSearch.current.version) return;
+      iconSearch.current.query = '';
+      setIconMessage('图标搜索失败，请重试');
+    } finally {if (version === iconSearch.current.version) setIconBusy(false);}
+  };
   const submit=async(event:FormEvent)=>{
     event.preventDefault();
     if (busy) return;
@@ -416,5 +440,9 @@ function AddSubscriptionModal({ locale, onClose, onSave }: { locale:Locale; onCl
       setError(reason instanceof Error ? reason.message : '添加失败，请重试');
     } finally {setBusy(false);}
   };
-  return <div className="modal-backdrop" role="presentation" onMouseDown={(e)=>{if(e.currentTarget===e.target)onClose();}}><section className="modal" role="dialog" aria-modal="true" aria-labelledby="add-title"><header><div><p>NEW SUBSCRIPTION</p><h2 id="add-title">{locale==='zh-CN'?'添加订阅':'Add subscription'}</h2></div><button onClick={onClose} aria-label="关闭"><X/></button></header><form onSubmit={submit}><div className="icon-name-row"><ServiceIcon size="large" item={{name:name||'?',color:colors[name.length%colors.length],iconUrl:iconUrl||undefined}}/><label className="field grow"><span>订阅名称</span><div className="input-with-action"><input autoFocus required value={name} onChange={(e)=>setName(e.target.value)} onBlur={searchIcon} placeholder="例如：Spotify"/><button type="button" onClick={searchIcon} title="从 App Store 匹配图标">{iconBusy?<RefreshCw className="spin"/>:<Search/>}</button></div></label></div><div className="form-grid"><label className="field span-2"><span>方案名称</span><input value={plan} onChange={(e)=>setPlan(e.target.value)} placeholder="例如：个人高级版"/></label><label className="field"><span>金额</span><input required inputMode="decimal" value={amount} onChange={(e)=>setAmount(e.target.value)} placeholder="0.00"/></label><label className="field"><span>货币</span><select value={currency} onChange={(e)=>setCurrency(e.target.value)}>{Object.keys(rates).map((code)=><option key={code}>{code}</option>)}</select></label><label className="field"><span>扣费周期</span><select value={cadence} onChange={(e)=>setCadence(e.target.value)}><option value="monthly">每月</option><option value="quarterly">每季度</option><option value="yearly">每年</option></select></label><label className="field"><span>下次续费</span><input type="date" required value={nextDate} onChange={(e)=>setNextDate(e.target.value)}/></label><label className="field span-2"><span>分类</span><select value={category} onChange={(e)=>setCategory(e.target.value)}><option>工作效率</option><option>影音娱乐</option><option>云服务</option><option>学习教育</option><option>健康生活</option><option>其他</option></select></label></div><div className="reminder-config"><span><Bell size={15}/>提前提醒</span><div>{[14,7,3,1].map((day)=><button type="button" key={day} className={reminders.includes(day)?'active':''} onClick={()=>setReminders(reminders.includes(day)?reminders.filter((v)=>v!==day):[...reminders,day])}>{day} 天</button>)}</div></div>{error&&<div className="form-error" role="alert">{error}</div>}<footer><button className="secondary" type="button" onClick={onClose}>取消</button><button className="primary" type="submit" disabled={busy}>{busy?<RefreshCw className="spin"/>:<Plus size={16}/>}添加订阅</button></footer></form></section></div>;
+  return <div className="modal-backdrop" role="presentation" onMouseDown={(e)=>{if(e.currentTarget===e.target)onClose();}}><section className="modal" role="dialog" aria-modal="true" aria-labelledby="add-title"><header><div><p>NEW SUBSCRIPTION</p><h2 id="add-title">{locale==='zh-CN'?'添加订阅':'Add subscription'}</h2></div><button onClick={onClose} aria-label="关闭"><X/></button></header><form onSubmit={submit}><div className="icon-name-row"><ServiceIcon size="large" item={{name:name||'?',color:colors[name.length%colors.length],iconUrl:iconUrl||undefined}}/><label className="field grow"><span>订阅名称</span><div className="input-with-action"><input autoFocus required value={name} onChange={(e)=>changeName(e.target.value)} onBlur={searchIcon} placeholder="例如：Spotify"/><button type="button" onClick={searchIcon} title="从 App Store 匹配图标">{iconBusy?<RefreshCw className="spin"/>:<Search/>}</button></div></label></div>
+    {iconBusy && <p className="icon-search-message" role="status">正在搜索图标...</p>}
+    {iconMessage && <p className="icon-search-message" role="status">{iconMessage}</p>}
+    {iconCandidates.length > 0 && <fieldset className="icon-candidates"><legend>订阅图标</legend><div className="icon-candidate-grid">{iconCandidates.map((candidate, index) => <label className="icon-candidate" key={candidate.bundle_id + index} title={candidate.name + ' · ' + candidate.developer}><input type="radio" name="subscription-icon" value={candidate.icon_url} checked={iconUrl === candidate.icon_url} onChange={() => setIconUrl(candidate.icon_url)} /><ServiceIcon item={{name:candidate.name,color:colors[index % colors.length],iconUrl:candidate.icon_url}}/><span><strong>{candidate.name}</strong><small>{candidate.developer}</small></span></label>)}</div></fieldset>}
+    <div className="form-grid"><label className="field span-2"><span>方案名称</span><input value={plan} onChange={(e)=>setPlan(e.target.value)} placeholder="例如：个人高级版"/></label><label className="field"><span>金额</span><input required inputMode="decimal" value={amount} onChange={(e)=>setAmount(e.target.value)} placeholder="0.00"/></label><label className="field"><span>货币</span><select value={currency} onChange={(e)=>setCurrency(e.target.value)}>{Object.keys(rates).map((code)=><option key={code}>{code}</option>)}</select></label><label className="field"><span>扣费周期</span><select value={cadence} onChange={(e)=>setCadence(e.target.value)}><option value="monthly">每月</option><option value="quarterly">每季度</option><option value="yearly">每年</option></select></label><label className="field"><span>下次续费</span><input type="date" required value={nextDate} onChange={(e)=>setNextDate(e.target.value)}/></label><label className="field span-2"><span>分类</span><select value={category} onChange={(e)=>setCategory(e.target.value)}><option>工作效率</option><option>影音娱乐</option><option>云服务</option><option>学习教育</option><option>健康生活</option><option>其他</option></select></label></div><div className="reminder-config"><span><Bell size={15}/>提前提醒</span><div>{[14,7,3,1].map((day)=><button type="button" key={day} className={reminders.includes(day)?'active':''} onClick={()=>setReminders(reminders.includes(day)?reminders.filter((v)=>v!==day):[...reminders,day])}>{day} 天</button>)}</div></div>{error&&<div className="form-error" role="alert">{error}</div>}<footer><button className="secondary" type="button" onClick={onClose}>取消</button><button className="primary" type="submit" disabled={busy}>{busy?<RefreshCw className="spin"/>:<Plus size={16}/>}添加订阅</button></footer></form></section></div>;
 }
