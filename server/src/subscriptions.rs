@@ -50,7 +50,43 @@ pub async fn create(
     for days in input.reminder_offsets.unwrap_or_else(|| vec![7, 3, 1]) {
         sqlx::query("INSERT INTO subscription_reminders (subscription_id, days_before) VALUES ($1,$2) ON CONFLICT DO NOTHING").bind(row.id).bind(days).execute(&mut **tx).await?;
     }
-    Ok(row)
+    find(tx, user_id, row.id).await
+}
+
+pub async fn update(
+    tx: &mut Transaction<'_, Postgres>,
+    user_id: Uuid,
+    id: Uuid,
+    input: CreateSubscription,
+) -> Result<Subscription, ApiError> {
+    validate(&input)?;
+    let row = sqlx::query_as::<_, Subscription>("UPDATE subscriptions SET name=$3,plan_name=$4,amount=$5,currency=upper($6),cadence_unit=$7,cadence_interval=$8,next_billing_date=$9,anchor_day=$10,category=$11,payment_method=$12,notes=$13,icon_url=$14,updated_at=now() WHERE id=$1 AND user_id=$2 AND status <> 'archived' RETURNING id,name,plan_name,amount,currency,cadence_unit,cadence_interval,next_billing_date,anchor_day,status,category,payment_method,notes,icon_url,created_at,updated_at")
+        .bind(id).bind(user_id).bind(input.name.trim()).bind(input.plan_name).bind(input.amount).bind(input.currency)
+        .bind(input.cadence_unit).bind(input.cadence_interval.unwrap_or(1)).bind(input.next_billing_date).bind(input.next_billing_date.day() as i16)
+        .bind(input.category.unwrap_or_else(|| "其他".into())).bind(input.payment_method).bind(input.notes).bind(input.icon_url)
+        .fetch_optional(&mut **tx).await?.ok_or(ApiError::NotFound)?;
+    sqlx::query("DELETE FROM subscription_reminders WHERE subscription_id=$1")
+        .bind(id)
+        .execute(&mut **tx)
+        .await?;
+    for days in input.reminder_offsets.unwrap_or_else(|| vec![7, 3, 1]) {
+        sqlx::query("INSERT INTO subscription_reminders (subscription_id, days_before) VALUES ($1,$2) ON CONFLICT DO NOTHING")
+            .bind(id).bind(days).execute(&mut **tx).await?;
+    }
+    find(tx, user_id, row.id).await
+}
+
+async fn find(
+    tx: &mut Transaction<'_, Postgres>,
+    user_id: Uuid,
+    id: Uuid,
+) -> Result<Subscription, ApiError> {
+    sqlx::query_as::<_, Subscription>("SELECT s.id,s.name,s.plan_name,s.amount,s.currency,s.cadence_unit,s.cadence_interval,s.next_billing_date,s.anchor_day,s.status,s.category,s.payment_method,s.notes,s.icon_url,coalesce((SELECT array_agg(r.days_before ORDER BY r.days_before DESC) FROM subscription_reminders r WHERE r.subscription_id=s.id),ARRAY[]::integer[]) reminder_offsets,s.created_at,s.updated_at FROM subscriptions s WHERE s.id=$1 AND s.user_id=$2 AND s.status <> 'archived'")
+        .bind(id)
+        .bind(user_id)
+        .fetch_optional(&mut **tx)
+        .await?
+        .ok_or(ApiError::NotFound)
 }
 
 #[cfg(test)]

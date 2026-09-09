@@ -22,12 +22,17 @@ npm run debug -- --wechat --no-tests
 WECHAT_ENABLED=true
 WECHAT_GATEWAY_TOKEN=<至少32字符的随机服务凭据>
 WECHAT_MODEL_URL=https://your-provider.example/v1/chat/completions
-WECHAT_MODEL_NAME=<支持图片和JSON输出的模型名>
+WECHAT_MODEL_NAME=<支持JSON输出的模型名>
 WECHAT_MODEL_API_KEY=<模型密钥>
+WECHAT_OCR_ENABLED=true
+WECHAT_OCR_LANG=chi_sim+eng
 ```
 
-`WECHAT_MODEL_URL` 是完整 Chat Completions 地址。模型服务必须支持
-`image_url` 内联 Base64 图片、`response_format: json_object`。
+Docker 默认使用容器内 Tesseract 识别中英文图片文字，再交给模型提取订阅字段；
+图片不写盘，也不会发送到外部模型。`WECHAT_OCR_ENABLED=false` 时会改为把
+`image_url` 内联 Base64 图片直接交给模型，此时模型必须支持视觉输入。
+`WECHAT_MODEL_URL` 是完整 Chat Completions 地址，模型服务必须支持
+`response_format: json_object`。
 请求超时 45 秒，不成功或非法 JSON 不覆盖已有草稿。
 网关身份由 API 的 `WECHAT_GATEWAY_ID` 指定，默认 `renuxa-wechat`；
 更换此身份会使旧身份下的绑定无法使用，正常升级不要更改。
@@ -39,8 +44,8 @@ WECHAT_MODEL_API_KEY=<模型密钥>
 
 ```sh
 docker compose --env-file .env -f docker/compose.build.yml up --build -d
-docker compose --env-file .env -f docker/compose.build.yml --profile wechat run --rm gateway im-channel-gateway --config /etc/renuxa/wechat.toml login wechat
-docker compose --env-file .env -f docker/compose.build.yml --profile wechat up -d gateway
+docker compose --env-file .env -f docker/compose.build.yml run --rm gateway im-channel-gateway --config /etc/renuxa/wechat.toml login wechat
+docker compose --env-file .env -f docker/compose.build.yml up -d gateway
 ```
 
 扫码登录命令会在终端显示二维码，并写入独立 `wechat-data` 卷。
@@ -91,9 +96,9 @@ cargo run -p im-channel-gateway -- --config /tmp/gateway.example.toml init
 API 和 gateway 可分别重启；账号、token、cursor 在卷内，草稿在 PostgreSQL。
 
 ```sh
-docker compose --env-file .env -f docker/compose.yml --profile wechat stop gateway
-docker compose --env-file .env -f docker/compose.yml --profile wechat run --rm gateway im-channel-gateway --config /etc/renuxa/wechat.toml login wechat
-docker compose --env-file .env -f docker/compose.yml --profile wechat up -d gateway
+docker compose --env-file .env -f docker/compose.yml stop gateway
+docker compose --env-file .env -f docker/compose.yml run --rm gateway im-channel-gateway --config /etc/renuxa/wechat.toml login wechat
+docker compose --env-file .env -f docker/compose.yml up -d gateway
 ```
 
 重新扫码应使用同一机器人微信账号。切换机器人账号前需解除旧绑定，
@@ -111,8 +116,8 @@ npx tsc --noEmit
 node --test app/billing.test.ts
 npm run lint
 npm run build
-docker compose --env-file .env -f docker/compose.yml --profile wechat config --quiet
-docker compose --env-file .env -f docker/compose.build.yml --profile wechat config --quiet
+docker compose --env-file .env -f docker/compose.yml config --quiet
+docker compose --env-file .env -f docker/compose.build.yml config --quiet
 # 使用可创建临时测试数据库的本地 PostgreSQL：
 DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/postgres cargo test -p renuxa-server --test wechat_flow -- --ignored
 # 构建并运行隔离容器验收（使用本机 55440 端口，自动清理测试容器和卷）：

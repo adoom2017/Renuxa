@@ -2,11 +2,10 @@
 
 import {
   Bell, CalendarDays, Check, ChevronLeft, ChevronRight, CircleDollarSign, CreditCard, Globe2,
-  LayoutDashboard, Menu, Pause, Play, Plus, ReceiptText, Send,
+  LayoutDashboard, Menu, Pause, Pencil, Play, Plus, ReceiptText, Send,
   RefreshCw, Search, Settings, ShieldCheck, SlidersHorizontal, Trash2,
   WalletCards, X,
 } from 'lucide-react';
-import Image from 'next/image';
 import { FormEvent, useEffect, useRef, useState } from 'react';
 import { billingDates, cadenceLabel, cadenceUnit } from './billing';
 
@@ -52,6 +51,11 @@ const seedNotices: Notice[] = [
 const rates: Record<string, number> = { CNY: 1, USD: 7.12, HKD: 0.91, EUR: 8.31, JPY: 0.048, GBP: 9.55 };
 const currencySymbols: Record<string, string> = { CNY: '¥', USD: 'US$', HKD: 'HK$', EUR: '€', JPY: 'JP¥', GBP: '£' };
 const colors = ['#1f6b50', '#375aa7', '#b34d45', '#75603c', '#5a4f94', '#277a7a'];
+function AppImage({ src, alt, width, height, priority = false }: { src: string; alt: string; width: number; height: number; priority?: boolean }) {
+  // This shared component must work in both the Next.js and standalone Vite builds.
+  // eslint-disable-next-line @next/next/no-img-element
+  return <img src={src} alt={alt} width={width} height={height} loading={priority ? 'eager' : 'lazy'} fetchPriority={priority ? 'high' : 'auto'} decoding="async" />;
+}
 function createLocalId() {
   // getRandomValues also works when a self-hosted instance is accessed over HTTP.
   return Array.from(crypto.getRandomValues(new Uint8Array(16)), (byte) => byte.toString(16).padStart(2, '0')).join('');
@@ -80,6 +84,7 @@ function remoteSubscription(row: Record<string, unknown>): Subscription {
     amount: Number(row.amount), currency: String(row.currency), cadence: String(row.cadence_unit), cadenceInterval: Number(row.cadence_interval), anchorDay: Number(row.anchor_day),
     nextDate: String(row.next_billing_date), category: String(row.category), status: String(row.status) as Status,
     color: colors[String(row.name).length % colors.length], iconUrl: row.icon_url ? String(row.icon_url) : undefined,
+    reminderOffsets: Array.isArray(row.reminder_offsets) ? row.reminder_offsets.map(Number) : undefined,
   };
 }
 
@@ -164,6 +169,7 @@ export default function RenuxaApp() {
   const [token, setToken, tokenReady] = useStoredState<string | null>('renuxa.token', null);
   const [userEmail, setUserEmail] = useStoredState('renuxa.user-email', '');
   const [modalOpen, setModalOpen] = useState(false);
+  const [editingSubscription, setEditingSubscription] = useState<Subscription | null>(null);
   const [mobileNav, setMobileNav] = useState(false);
   const [refreshVersion, setRefreshVersion] = useState(0);
   const [refreshError, setRefreshError] = useState('');
@@ -200,6 +206,11 @@ export default function RenuxaApp() {
     setNotices((current) => [{ id: createLocalId(), title: `${saved.name} 已添加`, body: `${money(saved.amount, saved.currency)} · ${saved.nextDate}`, date: '刚刚', read: false, kind: 'system' }, ...current]);
     setModalOpen(false); setView('subscriptions');
   };
+  const editSubscription = async (sub: Subscription) => {
+    const saved = token ? remoteSubscription(await apiRequest(`/subscriptions/${sub.id}`, { method:'PATCH', body:JSON.stringify({ name:sub.name, plan_name:sub.plan, amount:String(sub.amount), currency:sub.currency, cadence_unit:cadenceUnit(sub.cadence), cadence_interval:sub.cadenceInterval??1, next_billing_date:sub.nextDate, category:sub.category, icon_url:sub.iconUrl, reminder_offsets:sub.reminderOffsets ?? [7,3,1] }) }, token)) : sub;
+    setSubscriptions((current) => current.map((item) => item.id === saved.id ? saved : item));
+    setEditingSubscription(null); setModalOpen(false); setRefreshVersion((value) => value + 1);
+  };
   const updateStatus = (id: string, status: Status) => { setSubscriptions((current) => current.map((sub) => sub.id === id ? { ...sub, status } : sub)); if(token) void apiRequest(`/subscriptions/${id}`, {method:'PATCH',body:JSON.stringify({status})}, token).catch(()=>undefined); };
   const removeSubscription = (id: string) => { setSubscriptions((current) => current.filter((sub) => sub.id !== id)); if(token) void apiRequest(`/subscriptions/${id}`, {method:'DELETE'}, token).catch(()=>undefined); };
   const updateBill = (id:string,status:BillStatus) => { setBills((all) => all.map((bill) => bill.id === id ? { ...bill, status } : bill)); if(token) void apiRequest(`/bills/${id}`, {method:'PATCH',body:JSON.stringify({status})}, token).catch(()=>undefined); };
@@ -217,7 +228,7 @@ export default function RenuxaApp() {
     <main className="app-shell">
       <aside className={`sidebar ${mobileNav ? 'open' : ''}`}>
         <button className="brand" onClick={() => changeView('dashboard')} aria-label="续序首页">
-          <span className="brand-mark"><Image src="/renuxa-logo.svg" alt="" width={39} height={39} priority /></span><span><strong>续序</strong><small>Renuxa</small></span>
+          <span className="brand-mark"><AppImage src="/renuxa-logo.svg" alt="" width={39} height={39} priority /></span><span><strong>续序</strong><small>Renuxa</small></span>
         </button>
         <nav className="nav" aria-label="主导航">
           {nav.map(({ id, icon: Icon }, index) => <button key={id} className={view === id ? 'active' : ''} onClick={() => changeView(id)}>
@@ -228,14 +239,14 @@ export default function RenuxaApp() {
       </aside>
 
       <section className="content">
-        <div className="mobile-topbar"><button onClick={() => setMobileNav(!mobileNav)} aria-label="打开菜单"><Menu /></button><strong><Image src="/renuxa-logo.svg" alt="Renuxa" width={25} height={25} priority />续序</strong><button onClick={() => setModalOpen(true)} aria-label={t.add}><Plus /></button></div>
+        <div className="mobile-topbar"><button onClick={() => setMobileNav(!mobileNav)} aria-label="打开菜单"><Menu /></button><strong><AppImage src="/renuxa-logo.svg" alt="Renuxa" width={25} height={25} priority />续序</strong><button onClick={() => setModalOpen(true)} aria-label={t.add}><Plus /></button></div>
         {view === 'dashboard' && <Dashboard subscriptions={subscriptions} bills={bills} currency={baseCurrency} t={t} onAdd={() => setModalOpen(true)} onView={changeView} />}
-        {view === 'subscriptions' && <><div className="row-actions"><button title="刷新订阅" aria-label="刷新订阅" onClick={()=>setRefreshVersion(v=>v+1)}><RefreshCw size={18}/></button></div>{refreshError&&<p role="alert">{refreshError}</p>}<SubscriptionsView subscriptions={subscriptions} t={t} onAdd={() => setModalOpen(true)} onStatus={updateStatus} onRemove={removeSubscription} /></>}
+        {view === 'subscriptions' && <><div className="row-actions"><button title="刷新订阅" aria-label="刷新订阅" onClick={()=>setRefreshVersion(v=>v+1)}><RefreshCw size={18}/></button></div>{refreshError&&<p role="alert">{refreshError}</p>}<SubscriptionsView subscriptions={subscriptions} t={t} onAdd={() => {setEditingSubscription(null);setModalOpen(true);}} onEdit={(sub) => {setEditingSubscription(sub);setModalOpen(true);}} onStatus={updateStatus} onRemove={removeSubscription} /></>}
         {view === 'bills' && <BillsView bills={bills} t={t} onUpdate={updateBill} />}
         {view === 'notifications' && <NotificationsView notices={notices} t={t} onRead={readNotice} onReadAll={readAllNotices} />}
         {view === 'settings' && <><SettingsView locale={locale} setLocale={setLocale} currency={baseCurrency} setCurrency={setBaseCurrency} t={t} token={token} userEmail={userEmail} onLogout={() => { setToken(null); setUserEmail(''); }} /><WechatSettings token={token}/></>}
       </section>
-      {modalOpen && <AddSubscriptionModal locale={locale} onClose={() => setModalOpen(false)} onSave={addSubscription} />}
+      {modalOpen && <SubscriptionModal locale={locale} initial={editingSubscription} onClose={() => {setModalOpen(false);setEditingSubscription(null);}} onSave={editingSubscription ? editSubscription : addSubscription} />}
     </main>
   );
 }
@@ -243,7 +254,7 @@ export default function RenuxaApp() {
 function AuthScreen({ onAuthenticated }: { onAuthenticated:(session:{ access_token:string; email:string })=>void }) {
   const [mode,setMode]=useState<'login'|'register'>('login'); const [email,setEmail]=useState(''); const [password,setPassword]=useState(''); const [error,setError]=useState(''); const [busy,setBusy]=useState(false);
   const submit=async(event:FormEvent)=>{event.preventDefault();setBusy(true);setError('');try{const result=await apiRequest<{access_token:string;email:string}>(`/auth/${mode}`,{method:'POST',body:JSON.stringify({email,password})});onAuthenticated(result);}catch(reason){setError(reason instanceof Error?reason.message:'请求失败');}finally{setBusy(false);}};
-  return <main className="auth-shell"><section className="auth-brand"><span className="brand-mark"><Image src="/renuxa-logo.svg" alt="" width={39} height={39} priority /></span><div><strong>续序</strong><small>Renuxa</small></div><h1>让每一次续费，<br/>都心中有数</h1><p>订阅、账单、汇率和提醒，在同一处保持有序。</p></section><section className="auth-form-wrap"><form className="auth-form" onSubmit={submit}><p>RENuxa ACCOUNT</p><h2>{mode==='login'?'登录续序':'创建账户'}</h2><span>{mode==='login'?'继续管理你的所有订阅':'开始建立清晰的订阅账本'}</span><label className="field"><b>邮箱</b><input type="email" required value={email} onChange={(e)=>setEmail(e.target.value)} placeholder="name@example.com"/></label><label className="field"><b>密码</b><input type="password" required minLength={10} value={password} onChange={(e)=>setPassword(e.target.value)} placeholder="至少 10 位"/></label>{error&&<div className="form-error">{error}</div>}<button className="primary auth-submit" disabled={busy}>{busy?<RefreshCw className="spin"/>:mode==='login'?'登录':'注册'}</button><button className="auth-switch" type="button" onClick={()=>{setMode(mode==='login'?'register':'login');setError('')}}>{mode==='login'?'没有账户？创建一个':'已有账户？返回登录'}</button></form></section></main>;
+  return <main className="auth-shell"><section className="auth-brand"><span className="brand-mark"><AppImage src="/renuxa-logo.svg" alt="" width={39} height={39} priority /></span><div><strong>续序</strong><small>Renuxa</small></div><h1>让每一次续费，<br/>都心中有数</h1><p>订阅、账单、汇率和提醒，在同一处保持有序。</p></section><section className="auth-form-wrap"><form className="auth-form" onSubmit={submit}><p>RENuxa ACCOUNT</p><h2>{mode==='login'?'登录续序':'创建账户'}</h2><span>{mode==='login'?'继续管理你的所有订阅':'开始建立清晰的订阅账本'}</span><label className="field"><b>邮箱</b><input type="email" required value={email} onChange={(e)=>setEmail(e.target.value)} placeholder="name@example.com"/></label><label className="field"><b>密码</b><input type="password" required minLength={10} value={password} onChange={(e)=>setPassword(e.target.value)} placeholder="至少 10 位"/></label>{error&&<div className="form-error">{error}</div>}<button className="primary auth-submit" disabled={busy}>{busy?<RefreshCw className="spin"/>:mode==='login'?'登录':'注册'}</button><button className="auth-switch" type="button" onClick={()=>{setMode(mode==='login'?'register':'login');setError('')}}>{mode==='login'?'没有账户？创建一个':'已有账户？返回登录'}</button></form></section></main>;
 }
 
 function PageHeader({ eyebrow, title, description, action }: { eyebrow: string; title: string; description?: string; action?: React.ReactNode }) {
@@ -309,13 +320,13 @@ function SpendingCalendar({ subscriptions, currency }: { subscriptions: Subscrip
   return <section className="panel calendar-panel"><div className="panel-heading"><div><p>SPENDING CALENDAR</p><h2>{month.toLocaleDateString('zh-CN', { year: 'numeric', month: 'long' })}</h2></div><div className="calendar-nav"><button title="上个月" aria-label="上个月" onClick={() => setMonth(new Date(month.getFullYear(), month.getMonth() - 1, 1))}><ChevronLeft size={16}/></button><button title="下个月" aria-label="下个月" onClick={() => setMonth(new Date(month.getFullYear(), month.getMonth() + 1, 1))}><ChevronRight size={16}/></button></div></div><div className="calendar-grid">{['日','一','二','三','四','五','六'].map((day) => <span className="calendar-weekday" key={day}>{day}</span>)}{Array.from({ length: firstWeekday }, (_, index) => <span className="calendar-empty" key={`empty-${index}`} />)}{Array.from({ length: days }, (_, index) => { const day = index + 1; const date = new Date(month.getFullYear(), month.getMonth(), day); const items = entries.get(dateKey(date)) ?? []; return <div className={`calendar-day ${dateKey(date) === todayKey ? 'today' : ''}`} key={day}><b>{day}</b>{items.map((item) => { const converted = item.amount * (rates[item.currency] ?? 0) / (rates[currency] ?? 1); return <span className="calendar-entry" title={`${item.name} · ${money(item.amount, item.currency)}`} key={`${item.id}-${day}`}><i style={{ background: item.color }} />{item.name}<em>{money(converted, currency)}</em></span>; })}</div>; })}</div></section>;
 }
 
-function SubscriptionsView({ subscriptions, t, onAdd, onStatus, onRemove }: { subscriptions: Subscription[]; t: typeof copy['zh-CN']; onAdd: () => void; onStatus: (id:string,status:Status)=>void; onRemove:(id:string)=>void }) {
+function SubscriptionsView({ subscriptions, t, onAdd, onEdit, onStatus, onRemove }: { subscriptions: Subscription[]; t: typeof copy['zh-CN']; onAdd: () => void; onEdit:(sub:Subscription)=>void; onStatus: (id:string,status:Status)=>void; onRemove:(id:string)=>void }) {
   const [query, setQuery] = useState(''); const [filter, setFilter] = useState<'all'|Status>('all');
   const shown = subscriptions.filter((s) => (filter === 'all' || s.status === filter) && `${s.name} ${s.plan} ${s.category}`.toLowerCase().includes(query.toLowerCase()));
   return <>
     <PageHeader eyebrow="SUBSCRIPTIONS" title={t.subscriptions} description={t.subDesc} action={<button className="primary" onClick={onAdd}><Plus size={17}/>{t.add}</button>} />
     <div className="toolbar"><label className="search-field"><Search size={16}/><input value={query} onChange={(e)=>setQuery(e.target.value)} placeholder={t.search}/></label><label className="filter-select"><SlidersHorizontal size={15}/><select value={filter} onChange={(e)=>setFilter(e.target.value as typeof filter)}><option value="all">全部状态</option><option value="active">使用中</option><option value="paused">已暂停</option><option value="cancelled">已取消</option></select></label></div>
-    <section className="data-panel subscriptions-table"><div className="table-head"><span>订阅服务</span><span>分类</span><span>周期</span><span>下次续费</span><span>金额</span><span>状态</span><span /></div>{shown.map((sub)=><article className="table-row" key={sub.id}><div className="service-cell"><ServiceIcon item={sub}/><span><strong>{sub.name}</strong><small>{sub.plan}</small></span></div><span>{sub.category}</span><span>{cadenceLabel(sub)}</span><span>{sub.nextDate}</span><strong>{money(sub.amount,sub.currency)}</strong><StatusBadge status={sub.status}/><div className="row-actions">{sub.status === 'active' ? <button title="暂停" onClick={()=>onStatus(sub.id,'paused')}><Pause size={15}/></button> : <button title="恢复" onClick={()=>onStatus(sub.id,'active')}><Play size={15}/></button>}<button title="归档" onClick={()=>onRemove(sub.id)}><Trash2 size={15}/></button></div></article>)}</section>
+    <section className="data-panel subscriptions-table"><div className="table-head"><span>订阅服务</span><span>分类</span><span>周期</span><span>下次续费</span><span>金额</span><span>状态</span><span /></div>{shown.map((sub)=><article className="table-row" key={sub.id}><div className="service-cell"><ServiceIcon item={sub}/><span><strong>{sub.name}</strong><small>{sub.plan}</small></span></div><span>{sub.category}</span><span>{cadenceLabel(sub)}</span><span>{sub.nextDate}</span><strong>{money(sub.amount,sub.currency)}</strong><StatusBadge status={sub.status}/><div className="row-actions"><button title="编辑" aria-label={`编辑 ${sub.name}`} onClick={()=>onEdit(sub)}><Pencil size={15}/></button>{sub.status === 'active' ? <button title="暂停" onClick={()=>onStatus(sub.id,'paused')}><Pause size={15}/></button> : <button title="恢复" onClick={()=>onStatus(sub.id,'active')}><Play size={15}/></button>}<button title="归档" onClick={()=>onRemove(sub.id)}><Trash2 size={15}/></button></div></article>)}</section>
     {shown.length === 0 && <div className="empty-state"><Search/><strong>没有找到订阅</strong><span>调整搜索或筛选条件后再试。</span></div>}
   </>;
 }
@@ -422,18 +433,18 @@ function WechatSettings({token}:{token:string|null}) {
     } catch(reason){setError(reason instanceof Error?reason.message:'操作失败');}
     finally{setBusy(false);}
   };
-  return <section className="settings-group wechat-settings"><h2>微信接入</h2><SettingRow title={status?.bound?'已绑定':status?.enabled?'未绑定':'未启用'} description={code?`有效期至 ${expires}`:''}><button className="secondary" disabled={!token||!status?.enabled||busy} onClick={()=>void action(Boolean(status?.bound))}>{status?.bound?<Trash2 size={16}/>:<Plus size={16}/>} {busy?'处理中':status?.bound?'解绑':code?'刷新二维码':'扫码绑定微信'}</button></SettingRow>{code&&<div className="wechat-qr"><Image src={code} alt="微信绑定二维码" width={240} height={240} unoptimized /></div>}{qrStatus&&<p role="status">{qrStatus}</p>}{error&&<p className="save-error" role="alert">{error}</p>}</section>;
+  return <section className="settings-group wechat-settings"><h2>微信接入</h2><SettingRow title={status?.bound?'已绑定':status?.enabled?'未绑定':'未启用'} description={code?`有效期至 ${expires}`:''}><button className="secondary" disabled={!token||!status?.enabled||busy} onClick={()=>void action(Boolean(status?.bound))}>{status?.bound?<Trash2 size={16}/>:<Plus size={16}/>} {busy?'处理中':status?.bound?'解绑':code?'刷新二维码':'扫码绑定微信'}</button></SettingRow>{code&&<div className="wechat-qr"><AppImage src={code} alt="微信绑定二维码" width={240} height={240} /></div>}{qrStatus&&<p role="status">{qrStatus}</p>}{error&&<p className="save-error" role="alert">{error}</p>}</section>;
 }
 
 function SettingRow({ title, description, children }: { title:string; description:string; children:React.ReactNode }) { return <div className="setting-row"><div><strong>{title}</strong><small>{description}</small></div>{children}</div>; }
 
-function AddSubscriptionModal({ locale, onClose, onSave }: { locale:Locale; onClose:()=>void; onSave:(sub:Subscription)=>Promise<void> }) {
+function SubscriptionModal({ locale, initial, onClose, onSave }: { locale:Locale; initial:Subscription|null; onClose:()=>void; onSave:(sub:Subscription)=>Promise<void> }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [iconCandidates, setIconCandidates] = useState<{name:string; developer:string; icon_url:string; bundle_id:string}[]>([]);
   const [iconMessage, setIconMessage] = useState('');
   const iconSearch = useRef({ version: 0, query: '' });
-  const [name,setName]=useState(''); const [plan,setPlan]=useState(''); const [amount,setAmount]=useState(''); const [currency,setCurrency]=useState('CNY'); const [cadence,setCadence]=useState('monthly'); const [nextDate,setNextDate]=useState('2026-09-30'); const [category,setCategory]=useState('工作效率'); const [iconUrl,setIconUrl]=useState(''); const [iconBusy,setIconBusy]=useState(false); const [reminders,setReminders]=useState<number[]>(()=>{try{return JSON.parse(localStorage.getItem('renuxa.reminders')??'[7,3,1]')}catch{return [7,3,1]}});
+  const [name,setName]=useState(initial?.name??''); const [plan,setPlan]=useState(initial?.plan??''); const [amount,setAmount]=useState(initial?String(initial.amount):''); const [currency,setCurrency]=useState(initial?.currency??'CNY'); const [cadence,setCadence]=useState(cadenceUnit(initial?.cadence??'month')); const [cadenceInterval,setCadenceInterval]=useState(String(initial?.cadenceInterval??1)); const [nextDate,setNextDate]=useState(initial?.nextDate??'2026-09-30'); const [category,setCategory]=useState(initial?.category??'工作效率'); const [iconUrl,setIconUrl]=useState(initial?.iconUrl??''); const [iconBusy,setIconBusy]=useState(false); const [reminders,setReminders]=useState<number[]>(()=>initial?.reminderOffsets??(()=>{try{return JSON.parse(localStorage.getItem('renuxa.reminders')??'[7,3,1]')}catch{return [7,3,1]}})());
   const changeName = (value: string) => {
     setName(value);
     iconSearch.current = { version: iconSearch.current.version + 1, query: '' };
@@ -460,17 +471,20 @@ function AddSubscriptionModal({ locale, onClose, onSave }: { locale:Locale; onCl
     event.preventDefault();
     if (busy) return;
     const numeric=Number(amount);
+    const interval=Number(cadenceInterval);
     if(!name.trim()||!amount.trim()||!Number.isFinite(numeric)||numeric<0){setError('请输入订阅名称和有效的非负金额');return;}
+    if(!Number.isInteger(interval)||interval<1||interval>120){setError('周期倍数必须是 1 到 120 的整数');return;}
     setBusy(true);setError('');
     try {
-      await onSave({id:createLocalId(),name:name.trim(),plan:plan.trim()||'标准方案',amount:numeric,currency,cadence,nextDate,category,status:'active',color:colors[name.length%colors.length],iconUrl:iconUrl||undefined,reminderOffsets:reminders});
+      await onSave({id:initial?.id??createLocalId(),name:name.trim(),plan:plan.trim()||'标准方案',amount:numeric,currency,cadence,nextDate,category,status:initial?.status??'active',color:initial?.color??colors[name.length%colors.length],iconUrl:iconUrl||undefined,reminderOffsets:reminders,cadenceInterval:cadence==='once'?1:interval,anchorDay:initial?.anchorDay});
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : '添加失败，请重试');
+      setError(reason instanceof Error ? reason.message : `${initial?'保存':'添加'}失败，请重试`);
     } finally {setBusy(false);}
   };
-  return <div className="modal-backdrop" role="presentation" onMouseDown={(e)=>{if(e.currentTarget===e.target)onClose();}}><section className="modal" role="dialog" aria-modal="true" aria-labelledby="add-title"><header><div><p>NEW SUBSCRIPTION</p><h2 id="add-title">{locale==='zh-CN'?'添加订阅':'Add subscription'}</h2></div><button onClick={onClose} aria-label="关闭"><X/></button></header><form onSubmit={submit}><div className="icon-name-row"><ServiceIcon size="large" item={{name:name||'?',color:colors[name.length%colors.length],iconUrl:iconUrl||undefined}}/><label className="field grow"><span>订阅名称</span><div className="input-with-action"><input autoFocus required value={name} onChange={(e)=>changeName(e.target.value)} onBlur={searchIcon} placeholder="例如：Spotify"/><button type="button" onClick={searchIcon} title="从 App Store 匹配图标">{iconBusy?<RefreshCw className="spin"/>:<Search/>}</button></div></label></div>
+  const editing=Boolean(initial);
+  return <div className="modal-backdrop" role="presentation" onMouseDown={(e)=>{if(e.currentTarget===e.target)onClose();}}><section className="modal" role="dialog" aria-modal="true" aria-labelledby="subscription-modal-title"><header><div><p>{editing?'EDIT SUBSCRIPTION':'NEW SUBSCRIPTION'}</p><h2 id="subscription-modal-title">{locale==='zh-CN'?(editing?'编辑订阅':'添加订阅'):(editing?'Edit subscription':'Add subscription')}</h2></div><button onClick={onClose} aria-label="关闭"><X/></button></header><form onSubmit={submit}><div className="icon-name-row"><ServiceIcon size="large" item={{name:name||'?',color:initial?.color??colors[name.length%colors.length],iconUrl:iconUrl||undefined}}/><label className="field grow"><span>订阅名称</span><div className="input-with-action"><input autoFocus required value={name} onChange={(e)=>changeName(e.target.value)} onBlur={searchIcon} placeholder="例如：Spotify"/><button type="button" onClick={searchIcon} title="从 App Store 匹配图标">{iconBusy?<RefreshCw className="spin"/>:<Search/>}</button></div></label></div>
     {iconBusy && <p className="icon-search-message" role="status">正在搜索图标...</p>}
     {iconMessage && <p className="icon-search-message" role="status">{iconMessage}</p>}
     {iconCandidates.length > 0 && <fieldset className="icon-candidates"><legend>订阅图标</legend><div className="icon-candidate-grid">{iconCandidates.map((candidate, index) => <label className="icon-candidate" key={candidate.bundle_id + index} title={candidate.name + ' · ' + candidate.developer}><input type="radio" name="subscription-icon" value={candidate.icon_url} checked={iconUrl === candidate.icon_url} onChange={() => setIconUrl(candidate.icon_url)} /><ServiceIcon item={{name:candidate.name,color:colors[index % colors.length],iconUrl:candidate.icon_url}}/><span><strong>{candidate.name}</strong><small>{candidate.developer}</small></span></label>)}</div></fieldset>}
-    <div className="form-grid"><label className="field span-2"><span>方案名称</span><input value={plan} onChange={(e)=>setPlan(e.target.value)} placeholder="例如：个人高级版"/></label><label className="field"><span>金额</span><input required inputMode="decimal" value={amount} onChange={(e)=>setAmount(e.target.value)} placeholder="0.00"/></label><label className="field"><span>货币</span><select value={currency} onChange={(e)=>setCurrency(e.target.value)}>{Object.keys(rates).map((code)=><option key={code}>{code}</option>)}</select></label><label className="field"><span>扣费周期</span><select value={cadence} onChange={(e)=>setCadence(e.target.value)}><option value="monthly">每月</option><option value="quarterly">每季度</option><option value="yearly">每年</option></select></label><label className="field"><span>下次续费</span><input type="date" required value={nextDate} onChange={(e)=>setNextDate(e.target.value)}/></label><label className="field span-2"><span>分类</span><select value={category} onChange={(e)=>setCategory(e.target.value)}><option>工作效率</option><option>影音娱乐</option><option>云服务</option><option>学习教育</option><option>健康生活</option><option>其他</option></select></label></div><div className="reminder-config"><span><Bell size={15}/>提前提醒</span><div>{[14,7,3,1].map((day)=><button type="button" key={day} className={reminders.includes(day)?'active':''} onClick={()=>setReminders(reminders.includes(day)?reminders.filter((v)=>v!==day):[...reminders,day])}>{day} 天</button>)}</div></div>{error&&<div className="form-error" role="alert">{error}</div>}<footer><button className="secondary" type="button" onClick={onClose}>取消</button><button className="primary" type="submit" disabled={busy}>{busy?<RefreshCw className="spin"/>:<Plus size={16}/>}添加订阅</button></footer></form></section></div>;
+    <div className="form-grid"><label className="field span-2"><span>方案名称</span><input value={plan} onChange={(e)=>setPlan(e.target.value)} placeholder="例如：个人高级版"/></label><label className="field"><span>金额</span><input required inputMode="decimal" value={amount} onChange={(e)=>setAmount(e.target.value)} placeholder="0.00"/></label><label className="field"><span>货币</span><select value={currency} onChange={(e)=>setCurrency(e.target.value)}>{Object.keys(rates).map((code)=><option key={code}>{code}</option>)}</select></label><label className="field"><span>扣费周期</span><select value={cadence} onChange={(e)=>setCadence(e.target.value)}><option value="day">天</option><option value="week">周</option><option value="month">月</option><option value="quarter">季度</option><option value="year">年</option><option value="once">一次性</option></select></label><label className="field"><span>周期倍数</span><input type="number" min="1" max="120" required disabled={cadence==='once'} value={cadence==='once'?'1':cadenceInterval} onChange={(e)=>setCadenceInterval(e.target.value)}/></label><label className="field"><span>下次续费</span><input type="date" required value={nextDate} onChange={(e)=>setNextDate(e.target.value)}/></label><label className="field span-2"><span>分类</span><select value={category} onChange={(e)=>setCategory(e.target.value)}><option>工作效率</option><option>影音娱乐</option><option>云服务</option><option>学习教育</option><option>健康生活</option><option>其他</option></select></label></div><div className="reminder-config"><span><Bell size={15}/>提前提醒</span><div>{[14,7,3,1].map((day)=><button type="button" key={day} className={reminders.includes(day)?'active':''} onClick={()=>setReminders(reminders.includes(day)?reminders.filter((v)=>v!==day):[...reminders,day])}>{day} 天</button>)}</div></div>{error&&<div className="form-error" role="alert">{error}</div>}<footer><button className="secondary" type="button" onClick={onClose}>取消</button><button className="primary" type="submit" disabled={busy}>{busy?<RefreshCw className="spin"/>:editing?<Check size={16}/>:<Plus size={16}/>} {editing?'保存修改':'添加订阅'}</button></footer></form></section></div>;
 }

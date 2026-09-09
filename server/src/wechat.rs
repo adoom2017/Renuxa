@@ -16,7 +16,8 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use sqlx::{Postgres, Row, Transaction};
-use std::{io::Cursor, time::Duration};
+use std::{io::Cursor, process::Stdio, time::Duration};
+use tokio::io::AsyncWriteExt;
 use uuid::Uuid;
 
 const IMAGE_LIMIT: usize = 8 * 1024 * 1024;
@@ -466,6 +467,10 @@ async fn process(
         confirm(&mut tx, binding_id, user_id, text == "仍然添加").await?
     } else {
         let content = model_content(&request)?;
+        let content = match apply_local_ocr(content).await {
+            Ok(value) => value,
+            Err(_) => return sse("图片文字识别失败，请发送更清晰的截图，或改用文字发送订阅信息。"),
+        };
         let fields: Option<Value> = sqlx::query_scalar(
             "SELECT fields FROM wechat_drafts WHERE binding_id=$1 AND subscription_id IS NULL",
         )
@@ -724,6 +729,76 @@ fn model_content(request: &Request) -> Result<Vec<Value>, ApiError> {
     }
     Ok(content)
 }
+
+fn local_ocr_enabled() -> bool {
+    std::env::var("WECHAT_OCR_ENABLED").is_ok_and(|value| value == "true")
+}
+
+async fn apply_local_ocr(content: Vec<Value>) -> Result<Vec<Value>, ApiError> {
+    if !local_ocr_enabled() {
+        return Ok(content);
+    }
+    let mut processed = Vec::with_capacity(content.len());
+    for part in content {
+        if part.get("type").and_then(Value::as_str) != Some("image_url") {
+            processed.push(part);
+            continue;
+        }
+        let url = part
+            .get("image_url")
+            .and_then(|value| value.get("url"))
+            .and_then(Value::as_str)
+            .ok_or(ApiError::Upstream)?;
+        let (_, data) = url.split_once(',').ok_or(ApiError::Upstream)?;
+        let bytes = STANDARD.decode(data).map_err(|_| ApiError::Upstream)?;
+        let text = recognize_image_text(bytes).await?;
+        if text.trim().is_empty() {
+            return Err(ApiError::Validation("图片中未识别到文字".into()));
+        }
+        processed.push(json!({"type":"text","text":format!("[图片 OCR 结果]\n{text}")}));
+    }
+    Ok(processed)
+}
+
+async fn recognize_image_text(bytes: Vec<u8>) -> Result<String, ApiError> {
+    let language = std::env::var("WECHAT_OCR_LANG").unwrap_or_else(|_| "chi_sim+eng".into());
+    if language.len() > 64
+        || !language
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'+' | b'-'))
+    {
+        return Err(ApiError::Upstream);
+    }
+    let mut command = tokio::process::Command::new("tesseract");
+    command
+        .args(["stdin", "stdout", "-l", &language])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .kill_on_drop(true);
+    let mut child = command.spawn().map_err(|error| {
+        tracing::warn!(kind = ?error.kind(), "wechat OCR process unavailable");
+        ApiError::Upstream
+    })?;
+    let mut stdin = child.stdin.take().ok_or(ApiError::Upstream)?;
+    tokio::time::timeout(Duration::from_secs(10), stdin.write_all(&bytes))
+        .await
+        .map_err(|_| ApiError::Upstream)?
+        .map_err(|_| ApiError::Upstream)?;
+    drop(stdin);
+    let output = tokio::time::timeout(Duration::from_secs(30), child.wait_with_output())
+        .await
+        .map_err(|_| {
+            tracing::warn!("wechat OCR process timed out");
+            ApiError::Upstream
+        })?
+        .map_err(|_| ApiError::Upstream)?;
+    if !output.status.success() || output.stdout.len() > 64 * 1024 {
+        tracing::warn!(status = ?output.status.code(), "wechat OCR process failed");
+        return Err(ApiError::Upstream);
+    }
+    String::from_utf8(output.stdout).map_err(|_| ApiError::Upstream)
+}
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Extraction {
@@ -798,12 +873,8 @@ async fn extract(
         tracing::warn!("wechat extraction output truncated");
         return Err(ApiError::Upstream);
     }
-    let mut output: Extraction = serde_json::from_str(
-        value["choices"][0]["message"]["content"]
-            .as_str()
-            .ok_or(ApiError::Upstream)?,
-    )
-    .map_err(|error| {
+    let model_content = extraction_content(&value).ok_or(ApiError::Upstream)?;
+    let mut output: Extraction = serde_json::from_str(&model_content).map_err(|error| {
         tracing::warn!(
             line = error.line(),
             column = error.column(),
@@ -833,6 +904,36 @@ async fn extract(
     Ok(output)
 }
 
+fn extraction_content(response: &Value) -> Option<String> {
+    let content = response
+        .get("choices")?
+        .get(0)?
+        .get("message")?
+        .get("content")?;
+    let text = if let Some(text) = content.as_str() {
+        text.to_owned()
+    } else if let Some(parts) = content.as_array() {
+        parts
+            .iter()
+            .filter_map(|part| part.get("text").and_then(Value::as_str))
+            .collect::<Vec<_>>()
+            .join("")
+    } else {
+        return None;
+    };
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    // Some OpenAI-compatible vision endpoints wrap JSON in a Markdown fence.
+    let unwrapped = trimmed
+        .strip_prefix("```")
+        .and_then(|value| value.strip_suffix("```"))
+        .map(|value| value.strip_prefix("json").unwrap_or(value).trim())
+        .unwrap_or(trimmed);
+    Some(unwrapped.to_owned())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -844,6 +945,22 @@ mod tests {
         let mut other = json!({});
         configure_extraction_request("https://example.com/api.deepseek.com", &mut other);
         assert!(other.get("thinking").is_none());
+    }
+    #[test]
+    fn extraction_content_accepts_string_and_text_parts() {
+        let string = json!({"choices":[{"message":{"content":"```json\n{\"fields\":{},\"question\":\"\",\"multiple\":false}\n```"}}]});
+        assert_eq!(
+            extraction_content(&string).as_deref(),
+            Some("{\"fields\":{},\"question\":\"\",\"multiple\":false}")
+        );
+        let parts = json!({"choices":[{"message":{"content":[
+            {"type":"text","text":"{\"fields\":"},
+            {"type":"text","text":"{},\"question\":\"\",\"multiple\":false}"}
+        ]}}]});
+        assert_eq!(
+            extraction_content(&parts).as_deref(),
+            Some("{\"fields\":{},\"question\":\"\",\"multiple\":false}")
+        );
     }
     #[test]
     fn recognizes_natural_language_upcoming_queries() {

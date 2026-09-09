@@ -108,7 +108,7 @@ async fn list_subscriptions(
     user: CurrentUser,
     State(state): State<AppState>,
 ) -> Result<Json<Vec<Subscription>>, ApiError> {
-    let rows = sqlx::query_as::<_, Subscription>("SELECT id,name,plan_name,amount,currency,cadence_unit,cadence_interval,next_billing_date,anchor_day,status,category,payment_method,notes,icon_url,created_at,updated_at FROM subscriptions WHERE user_id=$1 AND status <> 'archived' ORDER BY next_billing_date")
+    let rows = sqlx::query_as::<_, Subscription>("SELECT s.id,s.name,s.plan_name,s.amount,s.currency,s.cadence_unit,s.cadence_interval,s.next_billing_date,s.anchor_day,s.status,s.category,s.payment_method,s.notes,s.icon_url,coalesce((SELECT array_agg(r.days_before ORDER BY r.days_before DESC) FROM subscription_reminders r WHERE r.subscription_id=s.id),ARRAY[]::integer[]) reminder_offsets,s.created_at,s.updated_at FROM subscriptions s WHERE s.user_id=$1 AND s.status <> 'archived' ORDER BY s.next_billing_date")
         .bind(user.0).fetch_all(&state.db).await?;
     Ok(Json(rows))
 }
@@ -130,6 +130,14 @@ async fn update_subscription(
     Path(id): Path<Uuid>,
     Json(patch): Json<Value>,
 ) -> Result<Json<Subscription>, ApiError> {
+    if patch.get("name").is_some() {
+        let input: CreateSubscription = serde_json::from_value(patch)
+            .map_err(|_| ApiError::Validation("订阅信息不完整".into()))?;
+        let mut tx = state.db.begin().await?;
+        let row = crate::subscriptions::update(&mut tx, user.0, id, input).await?;
+        tx.commit().await?;
+        return Ok(Json(row));
+    }
     let status = patch
         .get("status")
         .and_then(Value::as_str)

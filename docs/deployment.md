@@ -9,9 +9,11 @@ cp .env.example .env
 ```
 
 本地构建端口由 `RENUXA_WEB_PORT` 和 `RENUXA_API_PORT` 控制，默认分别为
-`3000` 和 `8081`。微信功能还需要 `WECHAT_ENABLED`、
+`3000` 和 `8081`。Compose 默认启用微信并启动 Gateway；微信功能还需要
 `WECHAT_GATEWAY_TOKEN`、`WECHAT_MODEL_URL`、`WECHAT_MODEL_NAME` 和
-`WECHAT_MODEL_API_KEY`。非 Compose 部署还需设置 `WECHAT_GATEWAY_URL`；
+`WECHAT_MODEL_API_KEY`。Docker 默认启用中英文 OCR，可通过 `WECHAT_OCR_ENABLED`
+和 `WECHAT_OCR_LANG` 调整。需要关闭微信时可设置 `WECHAT_ENABLED=false`。
+非 Compose 部署还需设置 `WECHAT_GATEWAY_URL`；
 `WECHAT_GATEWAY_ID` 默认且应稳定保持为 `renuxa-wechat`。详见 [微信接入](wechat.md)。
 
 ## 本地调试
@@ -39,10 +41,11 @@ docker compose --env-file .env -f docker/compose.yml up -d
 ## 本地镜像
 
 ```bash
-docker compose --env-file .env -f docker/compose.build.yml up --build -d
+docker compose --env-file .env -f docker/compose.build.yml up --build -d --wait
 ```
 
-该配置发布 Web 和 API 端口。
+该配置发布 Web 和 API 端口。`--wait` 会等到 Web、API 和 PostgreSQL 健康后再返回；
+不使用 `--wait` 时，命令返回后的前几十秒内服务仍可能处于启动阶段。
 
 ## 日常操作
 
@@ -73,5 +76,5 @@ npx tsc --noEmit
 npm run lint
 npm run build
 docker compose -f docker/compose.yml config --quiet
-docker compose -f docker/compose.build.yml --profile wechat config --quiet
+docker compose -f docker/compose.build.yml config --quiet
 ```

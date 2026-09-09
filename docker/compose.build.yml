@@ -33,12 +33,14 @@ services:
     environment:
       DATABASE_URL: postgres://renuxa:renuxa@postgres:5432/renuxa
       JWT_SECRET: ${JWT_SECRET:-development-only-change-me}
-      WECHAT_ENABLED: ${WECHAT_ENABLED:-false}
+      WECHAT_ENABLED: ${WECHAT_ENABLED:-true}
       WECHAT_GATEWAY_URL: http://gateway:18765
       WECHAT_GATEWAY_TOKEN: ${WECHAT_GATEWAY_TOKEN:-}
       WECHAT_MODEL_URL: ${WECHAT_MODEL_URL:-}
       WECHAT_MODEL_NAME: ${WECHAT_MODEL_NAME:-}
       WECHAT_MODEL_API_KEY: ${WECHAT_MODEL_API_KEY:-}
+      WECHAT_OCR_ENABLED: ${WECHAT_OCR_ENABLED:-true}
+      WECHAT_OCR_LANG: ${WECHAT_OCR_LANG:-chi_sim+eng}
     ports: ["${RENUXA_API_PORT:-8081}:8080"]
     depends_on: { postgres: { condition: service_healthy } }
     healthcheck:
@@ -60,7 +62,6 @@ services:
 
   gateway:
     <<: *server-build
-    profiles: ["wechat"]
     restart: unless-stopped
     init: true
     command: ["im-channel-gateway", "--config", "/etc/renuxa/wechat.toml", "run"]

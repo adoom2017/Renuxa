@@ -54,7 +54,7 @@ docker compose --env-file .env -f docker/compose.yml up -d
 如果需要在本机编译镜像（例如修改了 Rust 或前端代码），使用本地构建文件：
 
 ```bash
-docker compose --env-file .env -f docker/compose.build.yml up --build -d
+docker compose --env-file .env -f docker/compose.build.yml up --build -d --wait
 ```
 
 ### Linux 服务器（Docker Engine）

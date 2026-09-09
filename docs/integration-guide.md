@@ -11,7 +11,7 @@ API 默认监听容器内 `8080`。本地构建 Compose 默认发布到
 | `POST` | `/api/auth/register` | 注册并获取 JWT |
 | `POST` | `/api/auth/login` | 登录并获取 JWT |
 | `GET, POST` | `/api/subscriptions` | 查询或创建订阅 |
-| `PATCH, DELETE` | `/api/subscriptions/{id}` | 更新状态或归档订阅 |
+| `PATCH, DELETE` | `/api/subscriptions/{id}` | 编辑订阅详情、更新状态或归档订阅 |
 | `GET` | `/api/bills` | 查询账单 |
 | `PATCH` | `/api/bills/{id}` | 更新账单状态 |
 | `GET` | `/api/notifications` | 查询通知 |

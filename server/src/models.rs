@@ -20,6 +20,8 @@ pub struct Subscription {
     pub payment_method: Option<String>,
     pub notes: Option<String>,
     pub icon_url: Option<String>,
+    #[sqlx(default)]
+    pub reminder_offsets: Vec<i32>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
