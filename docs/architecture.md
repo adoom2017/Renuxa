@@ -8,7 +8,7 @@
 | `desktop/` | Vite 桌面 Web 入口 |
 | `src-tauri/` | Tauri 原生桌面壳 |
 | `server/` / API | Axum HTTP API、认证、订阅与微信业务状态机 |
-| `server/` / Worker | 生成账单和通知、发送邮件与 Telegram 通知、清理过期状态 |
+| `server/` / Worker | 生成账单和通知、发送 Telegram 通知、清理过期状态 |
 | `im-channel-gateway/` | 微信 iLink 和 Telegram 消息接入、媒体转换与消息转发 |
 | PostgreSQL | 用户、订阅、账单、通知、通知设置及微信会话状态 |
 
@@ -43,3 +43,4 @@ Worker 每分钟扫描 `subscriptions` 和 `subscription_reminders`。达到提�
   `wechat_drafts`、`wechat_messages`、`wechat_rate_limits`
 
 迁移由 API 启动时自动执行，定义位于 `server/migrations/`。
+旧数据库可能保留已停用的邮件配置列与历史投递记录；运行时代码不会读取或写入它们。

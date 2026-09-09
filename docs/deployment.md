@@ -33,8 +33,8 @@ docker compose --env-file .env -f docker/compose.yml pull
 docker compose --env-file .env -f docker/compose.yml up -d
 ```
 
-正式 Compose 只发布 Web 的 `3000` 端口。API、PostgreSQL、微信网关和可选
-Mailpit 仅在容器网络中通信。部署时应在 Web 前配置 HTTPS 反向代理。
+正式 Compose 只发布 Web 的 `3000` 端口。API、PostgreSQL 和微信网关仅在
+容器网络中通信。部署时应在 Web 前配置 HTTPS 反向代理。
 
 ## 本地镜像
 
@@ -42,11 +42,7 @@ Mailpit 仅在容器网络中通信。部署时应在 Web 前配置 HTTPS 反向
 docker compose --env-file .env -f docker/compose.build.yml up --build -d
 ```
 
-该配置发布 Web、API 端口；通过 `mail` profile 启用 Mailpit：
-
-```bash
-docker compose --env-file .env -f docker/compose.build.yml --profile mail up --build -d
-```
+该配置发布 Web 和 API 端口。
 
 ## 日常操作
 

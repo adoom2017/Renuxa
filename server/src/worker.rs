@@ -1,9 +1,5 @@
 use crate::AppState;
 use chrono::{Datelike, Months, NaiveDate};
-use lettre::{
-    AsyncSmtpTransport, AsyncTransport, Message, Tokio1Executor,
-    transport::smtp::authentication::Credentials,
-};
 use sqlx::Row;
 use uuid::Uuid;
 
@@ -33,19 +29,15 @@ pub async fn run_cycle(state: &AppState) -> Result<(), sqlx::Error> {
             .bind(format!("reminder:{id}:{due}:{days}"))
             .fetch_optional(&mut *tx).await?;
         if let Some(notification_id) = notification_id {
-            let settings: Option<(bool, bool)> = sqlx::query_as(
-                "SELECT telegram_enabled,email_enabled FROM notification_settings WHERE user_id=$1",
+            let telegram_enabled: bool = sqlx::query_scalar(
+                "SELECT coalesce((SELECT telegram_enabled FROM notification_settings WHERE user_id=$1),false)",
             )
             .bind(user_id)
-            .fetch_optional(&mut *tx)
+            .fetch_one(&mut *tx)
             .await?;
-            let (telegram_enabled, email_enabled) = settings.unwrap_or_default();
             let mut channels = vec!["in_app"];
             if telegram_enabled {
                 channels.push("telegram");
-            }
-            if email_enabled {
-                channels.push("email");
             }
             for channel in channels {
                 sqlx::query("INSERT INTO notification_deliveries (notification_id,channel,status,next_attempt_at) VALUES ($1,$2,'pending',now())")
@@ -84,7 +76,6 @@ pub async fn run_cycle(state: &AppState) -> Result<(), sqlx::Error> {
         }
     }
     tx.commit().await?;
-    deliver_email(state).await;
     deliver_telegram(state).await;
     sync_rates(state).await;
     Ok(())
@@ -131,54 +122,6 @@ async fn sync_rates(state: &AppState) {
             .bind(date).bind(currency).bind(rate).execute(&state.db).await;
     }
     let _ = sqlx::query("INSERT INTO exchange_rates(rate_date,base_currency,quote_currency,rate,provider) VALUES($1,'EUR','EUR',1,'frankfurter') ON CONFLICT DO NOTHING").bind(date).execute(&state.db).await;
-}
-
-async fn deliver_email(state: &AppState) {
-    let rows = match sqlx::query("SELECT d.id,u.email,n.title,n.body,s.smtp_host,s.smtp_port,s.smtp_tls,s.smtp_from,s.smtp_username,s.smtp_password FROM notification_deliveries d JOIN notifications n ON n.id=d.notification_id JOIN users u ON u.id=n.user_id JOIN notification_settings s ON s.user_id=n.user_id WHERE d.channel='email' AND d.status='pending' AND d.next_attempt_at<=now() AND s.email_enabled ORDER BY d.created_at FOR UPDATE OF d SKIP LOCKED LIMIT 50")
-        .fetch_all(&state.db).await { Ok(rows) => rows, Err(_) => return };
-    for row in rows {
-        let delivery_id: Uuid = row.get("id");
-        let host: String = row.get("smtp_host");
-        let mut builder = if row.get("smtp_tls") {
-            match AsyncSmtpTransport::<Tokio1Executor>::relay(&host) {
-                Ok(builder) => builder,
-                Err(_) => {
-                    record_delivery_result(state, delivery_id, false).await;
-                    continue;
-                }
-            }
-        } else {
-            AsyncSmtpTransport::<Tokio1Executor>::builder_dangerous(&host)
-        };
-        let username: String = row.get("smtp_username");
-        if !username.is_empty() {
-            builder = builder.credentials(Credentials::new(
-                username,
-                row.get::<Option<String>, _>("smtp_password")
-                    .unwrap_or_default(),
-            ));
-        }
-        let mailer = builder.port(row.get::<i32, _>("smtp_port") as u16).build();
-        let message = Message::builder()
-            .from(match row.get::<String, _>("smtp_from").parse() {
-                Ok(value) => value,
-                Err(_) => {
-                    record_delivery_result(state, delivery_id, false).await;
-                    continue;
-                }
-            })
-            .to(match row.get::<String, _>("email").parse() {
-                Ok(value) => value,
-                Err(_) => continue,
-            })
-            .subject(row.get::<String, _>("title"))
-            .body(row.get::<String, _>("body"));
-        let sent = match message {
-            Ok(message) => mailer.send(message).await.is_ok(),
-            Err(_) => false,
-        };
-        record_delivery_result(state, delivery_id, sent).await;
-    }
 }
 
 async fn deliver_telegram(state: &AppState) {

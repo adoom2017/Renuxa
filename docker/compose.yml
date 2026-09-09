@@ -57,10 +57,6 @@ services:
       WECHAT_GATEWAY_TOKEN: ${WECHAT_GATEWAY_TOKEN:-}
     volumes: ["wechat-data:/var/lib/renuxa-wechat"]
     depends_on: { api: { condition: service_healthy } }
-  mailpit:
-    image: axllent/mailpit:latest
-    profiles: ["mail"]
-    restart: unless-stopped
 volumes:
   postgres-data:
   wechat-data:

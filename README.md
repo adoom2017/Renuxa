@@ -22,7 +22,7 @@ npm run dev
 
 ## Docker Compose 一键启动
 
-Docker Compose 默认启动 Web、API、Worker 和 PostgreSQL；Mailpit 是通过 `mail` profile 启用的可选本地测试服务。数据库迁移由 API 启动时自动执行。
+Docker Compose 默认启动 Web、API、Worker 和 PostgreSQL。数据库迁移由 API 启动时自动执行。
 
 ### macOS（Colima）
 
@@ -113,25 +113,17 @@ git push origin v0.1.1
 
 工作流会并行构建 `adoom2018/renuxa-web` 和 `adoom2018/renuxa-server`，分别发布 `linux/amd64`、`linux/arm64` 的 `0.1.1` 与 `latest` 标签。也可以在 GitHub 的 Actions 页面选择 `Publish Docker images`，手动输入版本号运行。
 
-正式的 `docker/compose.yml` 只向宿主机暴露 Web 端口 `3000`。API 和 PostgreSQL 仅在 Compose 内部网络通信；可选的 Mailpit 同样不对外开放。生产环境建议通过 HTTPS 反向代理暴露 Web。
+正式的 `docker/compose.yml` 只向宿主机暴露 Web 端口 `3000`。API 和 PostgreSQL 仅在 Compose 内部网络通信。生产环境建议通过 HTTPS 反向代理暴露 Web。
 
-本地调试使用 `docker/compose.build.yml`，该配置额外暴露 API 的 `8081`、Mailpit Web 的 `8025` 和 SMTP 的 `1025` 端口。
+本地调试使用 `docker/compose.build.yml`，该配置额外暴露 API 的 `8081` 端口。
 
 ### 通知渠道
 
-通知渠道由每位用户登录后在“设置 → 通知”中配置，不需要在服务器 `.env` 中保存 Telegram 或 SMTP 凭据。应用内通知始终启用，Telegram 和邮件可分别开启。
+通知渠道由每位用户登录后在“设置 → 通知”中配置。应用内通知始终启用，Telegram 可以单独开启。
 
 Telegram 需要填写从 BotFather 获取的 Bot Token，以及接收提醒的 Chat ID。每个账户保存独立配置，提醒只会发送到该账户设置的会话。
 
-邮件是可选渠道。启用时在页面填写 SMTP 主机、端口、TLS、发件人、用户名和密码。Bot Token 与 SMTP 密码写入后不会通过读取接口返回到浏览器；留空保存会保留已配置的密钥。
-
-Mailpit 只用于本地测试邮件，不会向真实邮箱投递。需要时通过 `mail` profile 启动，然后在通知设置中填写主机 `mailpit`、端口 `1025` 并关闭 TLS：
-
-```bash
-docker compose --env-file .env -f docker/compose.build.yml --profile mail up --build -d
-```
-
-未启用邮件时无需安装或启动 Mailpit。
+Bot Token 写入后不会通过读取接口返回到浏览器；留空保存会保留已配置的密钥。
 
 ### 常用命令
 
@@ -149,11 +141,8 @@ docker compose --env-file .env -f docker/compose.yml down
 docker compose --env-file .env -f docker/compose.yml pull
 docker compose --env-file .env -f docker/compose.yml up -d
 
-# 使用本地源码构建并后台启动（不安装 Mailpit）
+# 使用本地源码构建并后台启动
 docker compose --env-file .env -f docker/compose.build.yml up --build -d
-
-# 本地构建并安装 Mailpit 测试邮件
-docker compose --env-file .env -f docker/compose.build.yml --profile mail up --build -d
 ```
 
 服务默认地址：
@@ -162,7 +151,6 @@ docker compose --env-file .env -f docker/compose.build.yml --profile mail up --b
 | --- | --- | --- |
 | Web | `http://127.0.0.1:3000` | Renuxa Web 界面 |
 | API（本地构建配置） | `http://127.0.0.1:8081` | Rust API 与健康检查 |
-| Mailpit（本地构建且启用 `mail` profile） | `http://127.0.0.1:8025` | 查看开发环境邮件 |
 
 ## 桌面开发
 
