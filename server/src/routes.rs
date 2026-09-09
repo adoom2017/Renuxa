@@ -16,13 +16,13 @@ use axum::{
     response::Response,
     routing::{get, patch, post},
 };
-use chrono::Datelike;
 use serde::Deserialize;
 use serde_json::{Value, json};
 use uuid::Uuid;
 
 pub fn router() -> Router<AppState> {
     Router::new()
+        .merge(crate::wechat::router())
         .route("/auth/register", post(register))
         .route("/auth/login", post(login))
         .route(
@@ -118,20 +118,8 @@ async fn create_subscription(
     State(state): State<AppState>,
     Json(input): Json<CreateSubscription>,
 ) -> Result<(StatusCode, Json<Subscription>), ApiError> {
-    if input.name.trim().is_empty() || input.amount.is_sign_negative() || input.currency.len() != 3
-    {
-        return Err(ApiError::Validation("请检查名称、金额和货币".into()));
-    }
-    let interval = input.cadence_interval.unwrap_or(1).clamp(1, 120);
     let mut tx = state.db.begin().await?;
-    let row = sqlx::query_as::<_, Subscription>("INSERT INTO subscriptions (user_id,name,plan_name,amount,currency,cadence_unit,cadence_interval,next_billing_date,anchor_day,category,payment_method,notes,icon_url) VALUES ($1,$2,$3,$4,upper($5),$6,$7,$8,$9,$10,$11,$12,$13) RETURNING id,name,plan_name,amount,currency,cadence_unit,cadence_interval,next_billing_date,anchor_day,status,category,payment_method,notes,icon_url,created_at,updated_at")
-        .bind(user.0).bind(input.name.trim()).bind(input.plan_name).bind(input.amount).bind(input.currency)
-        .bind(input.cadence_unit).bind(interval).bind(input.next_billing_date).bind(input.next_billing_date.day() as i16)
-        .bind(input.category.unwrap_or_else(|| "其他".into())).bind(input.payment_method).bind(input.notes).bind(input.icon_url)
-        .fetch_one(&mut *tx).await?;
-    for days in input.reminder_offsets.unwrap_or_else(|| vec![7, 3, 1]) {
-        sqlx::query("INSERT INTO subscription_reminders (subscription_id, days_before) VALUES ($1,$2) ON CONFLICT DO NOTHING").bind(row.id).bind(days.clamp(0,365)).execute(&mut *tx).await?;
-    }
+    let row = crate::subscriptions::create(&mut tx, user.0, input).await?;
     tx.commit().await?;
     Ok((StatusCode::CREATED, Json(row)))
 }

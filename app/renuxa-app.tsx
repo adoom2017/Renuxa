@@ -7,6 +7,7 @@ import {
   WalletCards, X,
 } from 'lucide-react';
 import { FormEvent, useEffect, useRef, useState } from 'react';
+import { billingDates, cadenceLabel, cadenceUnit } from './billing';
 
 type View = 'dashboard' | 'subscriptions' | 'bills' | 'notifications' | 'settings';
 type Status = 'active' | 'paused' | 'cancelled';
@@ -15,7 +16,7 @@ type Locale = 'zh-CN' | 'en';
 
 type Subscription = {
   id: string; name: string; plan: string; amount: number; currency: string; cadence: string;
-  nextDate: string; category: string; status: Status; color: string; iconUrl?: string; reminderOffsets?: number[];
+  nextDate: string; category: string; status: Status; color: string; iconUrl?: string; reminderOffsets?: number[]; cadenceInterval?: number; anchorDay?: number;
 };
 
 type Bill = { id: string; subscription: string; date: string; amount: number; currency: string; status: BillStatus };
@@ -61,23 +62,23 @@ const apiUrl = configuredApiUrl
   ? `${configuredApiUrl.replace(/\/api$/, '')}/api`
   : undefined;
 
-async function apiRequest(path: string, init: RequestInit = {}, token?: string | null) {
+async function apiRequest<T = Record<string, unknown>>(path: string, init: RequestInit = {}, token?: string | null): Promise<T> {
   if (!apiUrl) throw new Error('API is not configured');
   const headers = new Headers(init.headers);
   headers.set('content-type', 'application/json');
   if (token) headers.set('authorization', `Bearer ${token}`);
   const response = await fetch(`${apiUrl}${path}`, { ...init, headers });
   if (!response.ok) {
-    const payload = await response.json().catch(() => null);
-    throw new Error(payload?.error?.message ?? '请求失败');
+    const payload = await response.json().catch(() => null) as {error?:{message?:string}} | null;
+    throw Object.assign(new Error(payload?.error?.message ?? '请求失败'), {status:response.status});
   }
-  return response.status === 204 ? null : response.json();
+  return (response.status === 204 ? null : await response.json()) as T;
 }
 
 function remoteSubscription(row: Record<string, unknown>): Subscription {
   return {
     id: String(row.id), name: String(row.name), plan: String(row.plan_name ?? '标准方案'),
-    amount: Number(row.amount), currency: String(row.currency), cadence: String(row.cadence_unit) === 'year' ? 'yearly' : String(row.cadence_unit) === 'quarter' ? 'quarterly' : 'monthly',
+    amount: Number(row.amount), currency: String(row.currency), cadence: String(row.cadence_unit), cadenceInterval: Number(row.cadence_interval), anchorDay: Number(row.anchor_day),
     nextDate: String(row.next_billing_date), category: String(row.category), status: String(row.status) as Status,
     color: colors[String(row.name).length % colors.length], iconUrl: row.icon_url ? String(row.icon_url) : undefined,
   };
@@ -138,30 +139,13 @@ function ServiceIconImage({ source, fallback }: { source: string; fallback: stri
   </>;
 }
 
-function addBillingMonths(date: Date, months: number) {
-  const day = date.getDate();
-  const result = new Date(date.getFullYear(), date.getMonth() + months, 1);
-  const lastDay = new Date(result.getFullYear(), result.getMonth() + 1, 0).getDate();
-  result.setDate(Math.min(day, lastDay));
-  return result;
-}
 
 function scheduledSpend(subscriptions: Subscription[], start: Date, end: Date) {
   return subscriptions.reduce((total, sub) => {
-    const interval = sub.cadence === 'yearly' ? 12 : sub.cadence === 'quarterly' ? 3 : 1;
-    let billingDate = new Date(`${sub.nextDate}T00:00:00`);
-    if (Number.isNaN(billingDate.getTime())) return total;
-    while (addBillingMonths(billingDate, -interval) >= start) {
-      billingDate = addBillingMonths(billingDate, -interval);
-    }
-    while (billingDate < start) billingDate = addBillingMonths(billingDate, interval);
-    while (billingDate < end) {
-      total += sub.amount * (rates[sub.currency] ?? 0);
-      billingDate = addBillingMonths(billingDate, interval);
-    }
-    return total;
+    return total + billingDates(sub, start, end).length * sub.amount * (rates[sub.currency] ?? 0);
   }, 0);
 }
+
 
 function ServiceIcon({ item, size = 'normal' }: { item: Pick<Subscription, 'name' | 'color' | 'iconUrl'>; size?: 'normal' | 'large' }) {
   const source = iconSource(item.iconUrl);
@@ -182,19 +166,28 @@ export default function RenuxaApp() {
   const [userEmail, setUserEmail] = useStoredState('renuxa.user-email', '');
   const [modalOpen, setModalOpen] = useState(false);
   const [mobileNav, setMobileNav] = useState(false);
+  const [refreshVersion, setRefreshVersion] = useState(0);
+  const [refreshError, setRefreshError] = useState('');
   const t = copy[locale];
   const unread = notices.filter((notice) => !notice.read).length;
+
+  useEffect(()=>{
+    const refresh=()=>setRefreshVersion(v=>v+1);
+    window.addEventListener('focus',refresh);
+    return ()=>window.removeEventListener('focus',refresh);
+  },[]);
 
   useEffect(() => {
     if (!apiUrl || !token) return;
     Promise.all([
-      apiRequest('/subscriptions', {}, token), apiRequest('/bills', {}, token), apiRequest('/notifications', {}, token),
+      apiRequest<Record<string,unknown>[]>('/subscriptions', {}, token), apiRequest<Record<string,unknown>[]>('/bills', {}, token), apiRequest<Record<string,unknown>[]>('/notifications', {}, token),
     ]).then(([remoteSubs, remoteBills, remoteNotices]) => {
+      setRefreshError('');
       setSubscriptions((remoteSubs as Record<string, unknown>[]).map(remoteSubscription));
       setBills((remoteBills as Record<string, unknown>[]).map((row) => ({ id:String(row.id), subscription:String(row.subscription_name), date:String(row.due_date), amount:Number(row.amount), currency:String(row.currency), status:String(row.status) as BillStatus })));
       setNotices((remoteNotices as Record<string, unknown>[]).map((row) => ({ id:String(row.id), title:String(row.title), body:String(row.body), date:new Date(String(row.scheduled_for)).toLocaleString(), read:Boolean(row.read_at), kind:String(row.kind)==='renewal'?'renewal':'system' })));
-    }).catch(() => setToken(null));
-  }, [token, setBills, setNotices, setSubscriptions, setToken]);
+    }).catch((error) => { if(error?.status===401) setToken(null); else setRefreshError(error instanceof Error?error.message:'刷新失败'); });
+  }, [token, view, refreshVersion, setBills, setNotices, setSubscriptions, setToken]);
 
   const nav: { id: View; icon: typeof LayoutDashboard }[] = [
     { id: 'dashboard', icon: LayoutDashboard }, { id: 'subscriptions', icon: CreditCard },
@@ -203,7 +196,7 @@ export default function RenuxaApp() {
 
   const changeView = (next: View) => { setView(next); setMobileNav(false); };
   const addSubscription = async (sub: Subscription) => {
-    const saved = token ? remoteSubscription(await apiRequest('/subscriptions', { method:'POST', body:JSON.stringify({ name:sub.name, plan_name:sub.plan, amount:String(sub.amount), currency:sub.currency, cadence_unit:sub.cadence==='yearly'?'year':sub.cadence==='quarterly'?'quarter':'month', cadence_interval:1, next_billing_date:sub.nextDate, category:sub.category, icon_url:sub.iconUrl, reminder_offsets:sub.reminderOffsets ?? [7,3,1] }) }, token)) : sub;
+    const saved = token ? remoteSubscription(await apiRequest('/subscriptions', { method:'POST', body:JSON.stringify({ name:sub.name, plan_name:sub.plan, amount:String(sub.amount), currency:sub.currency, cadence_unit:cadenceUnit(sub.cadence), cadence_interval:sub.cadenceInterval??1, next_billing_date:sub.nextDate, category:sub.category, icon_url:sub.iconUrl, reminder_offsets:sub.reminderOffsets ?? [7,3,1] }) }, token)) : sub;
     setSubscriptions((current) => [saved, ...current]);
     setNotices((current) => [{ id: createLocalId(), title: `${saved.name} 已添加`, body: `${money(saved.amount, saved.currency)} · ${saved.nextDate}`, date: '刚刚', read: false, kind: 'system' }, ...current]);
     setModalOpen(false); setView('subscriptions');
@@ -238,10 +231,10 @@ export default function RenuxaApp() {
       <section className="content">
         <div className="mobile-topbar"><button onClick={() => setMobileNav(!mobileNav)} aria-label="打开菜单"><Menu /></button><strong><img src="/renuxa-logo.svg" alt="Renuxa" />续序</strong><button onClick={() => setModalOpen(true)} aria-label={t.add}><Plus /></button></div>
         {view === 'dashboard' && <Dashboard subscriptions={subscriptions} bills={bills} currency={baseCurrency} t={t} onAdd={() => setModalOpen(true)} onView={changeView} />}
-        {view === 'subscriptions' && <SubscriptionsView subscriptions={subscriptions} t={t} onAdd={() => setModalOpen(true)} onStatus={updateStatus} onRemove={removeSubscription} />}
+        {view === 'subscriptions' && <><div className="row-actions"><button title="刷新订阅" aria-label="刷新订阅" onClick={()=>setRefreshVersion(v=>v+1)}><RefreshCw size={18}/></button></div>{refreshError&&<p role="alert">{refreshError}</p>}<SubscriptionsView subscriptions={subscriptions} t={t} onAdd={() => setModalOpen(true)} onStatus={updateStatus} onRemove={removeSubscription} /></>}
         {view === 'bills' && <BillsView bills={bills} t={t} onUpdate={updateBill} />}
         {view === 'notifications' && <NotificationsView notices={notices} t={t} onRead={readNotice} onReadAll={readAllNotices} />}
-        {view === 'settings' && <SettingsView locale={locale} setLocale={setLocale} currency={baseCurrency} setCurrency={setBaseCurrency} t={t} token={token} userEmail={userEmail} onLogout={() => { setToken(null); setUserEmail(''); }} />}
+        {view === 'settings' && <><SettingsView locale={locale} setLocale={setLocale} currency={baseCurrency} setCurrency={setBaseCurrency} t={t} token={token} userEmail={userEmail} onLogout={() => { setToken(null); setUserEmail(''); }} /><WechatSettings token={token}/></>}
       </section>
       {modalOpen && <AddSubscriptionModal locale={locale} onClose={() => setModalOpen(false)} onSave={addSubscription} />}
     </main>
@@ -250,7 +243,7 @@ export default function RenuxaApp() {
 
 function AuthScreen({ onAuthenticated }: { onAuthenticated:(session:{ access_token:string; email:string })=>void }) {
   const [mode,setMode]=useState<'login'|'register'>('login'); const [email,setEmail]=useState(''); const [password,setPassword]=useState(''); const [error,setError]=useState(''); const [busy,setBusy]=useState(false);
-  const submit=async(event:FormEvent)=>{event.preventDefault();setBusy(true);setError('');try{const result=await apiRequest(`/auth/${mode}`,{method:'POST',body:JSON.stringify({email,password})});onAuthenticated(result);}catch(reason){setError(reason instanceof Error?reason.message:'请求失败');}finally{setBusy(false);}};
+  const submit=async(event:FormEvent)=>{event.preventDefault();setBusy(true);setError('');try{const result=await apiRequest<{access_token:string;email:string}>(`/auth/${mode}`,{method:'POST',body:JSON.stringify({email,password})});onAuthenticated(result);}catch(reason){setError(reason instanceof Error?reason.message:'请求失败');}finally{setBusy(false);}};
   return <main className="auth-shell"><section className="auth-brand"><span className="brand-mark"><img src="/renuxa-logo.svg" alt="" /></span><div><strong>续序</strong><small>Renuxa</small></div><h1>让每一次续费，<br/>都心中有数</h1><p>订阅、账单、汇率和提醒，在同一处保持有序。</p></section><section className="auth-form-wrap"><form className="auth-form" onSubmit={submit}><p>RENuxa ACCOUNT</p><h2>{mode==='login'?'登录续序':'创建账户'}</h2><span>{mode==='login'?'继续管理你的所有订阅':'开始建立清晰的订阅账本'}</span><label className="field"><b>邮箱</b><input type="email" required value={email} onChange={(e)=>setEmail(e.target.value)} placeholder="name@example.com"/></label><label className="field"><b>密码</b><input type="password" required minLength={10} value={password} onChange={(e)=>setPassword(e.target.value)} placeholder="至少 10 位"/></label>{error&&<div className="form-error">{error}</div>}<button className="primary auth-submit" disabled={busy}>{busy?<RefreshCw className="spin"/>:mode==='login'?'登录':'注册'}</button><button className="auth-switch" type="button" onClick={()=>{setMode(mode==='login'?'register':'login');setError('')}}>{mode==='login'?'没有账户？创建一个':'已有账户？返回登录'}</button></form></section></main>;
 }
 
@@ -308,15 +301,9 @@ function SpendingCalendar({ subscriptions, currency }: { subscriptions: Subscrip
   const days = new Date(month.getFullYear(), month.getMonth() + 1, 0).getDate();
   const entries = new Map<string, Subscription[]>();
   subscriptions.forEach((sub) => {
-    const interval = sub.cadence === 'yearly' ? 12 : sub.cadence === 'quarterly' ? 3 : 1;
-    let billingDate = new Date(`${sub.nextDate}T00:00:00`);
-    if (Number.isNaN(billingDate.getTime())) return;
-    while (addBillingMonths(billingDate, -interval) >= month) billingDate = addBillingMonths(billingDate, -interval);
-    while (billingDate < month) billingDate = addBillingMonths(billingDate, interval);
-    while (billingDate < monthEnd) {
+    for (const billingDate of billingDates(sub, month, monthEnd)) {
       const key = dateKey(billingDate);
       entries.set(key, [...(entries.get(key) ?? []), sub]);
-      billingDate = addBillingMonths(billingDate, interval);
     }
   });
   const todayKey = dateKey(new Date());
@@ -329,7 +316,7 @@ function SubscriptionsView({ subscriptions, t, onAdd, onStatus, onRemove }: { su
   return <>
     <PageHeader eyebrow="SUBSCRIPTIONS" title={t.subscriptions} description={t.subDesc} action={<button className="primary" onClick={onAdd}><Plus size={17}/>{t.add}</button>} />
     <div className="toolbar"><label className="search-field"><Search size={16}/><input value={query} onChange={(e)=>setQuery(e.target.value)} placeholder={t.search}/></label><label className="filter-select"><SlidersHorizontal size={15}/><select value={filter} onChange={(e)=>setFilter(e.target.value as typeof filter)}><option value="all">全部状态</option><option value="active">使用中</option><option value="paused">已暂停</option><option value="cancelled">已取消</option></select></label></div>
-    <section className="data-panel subscriptions-table"><div className="table-head"><span>订阅服务</span><span>分类</span><span>周期</span><span>下次续费</span><span>金额</span><span>状态</span><span /></div>{shown.map((sub)=><article className="table-row" key={sub.id}><div className="service-cell"><ServiceIcon item={sub}/><span><strong>{sub.name}</strong><small>{sub.plan}</small></span></div><span>{sub.category}</span><span>{sub.cadence === 'yearly' ? '每年' : sub.cadence === 'quarterly' ? '每季度' : '每月'}</span><span>{sub.nextDate}</span><strong>{money(sub.amount,sub.currency)}</strong><StatusBadge status={sub.status}/><div className="row-actions">{sub.status === 'active' ? <button title="暂停" onClick={()=>onStatus(sub.id,'paused')}><Pause size={15}/></button> : <button title="恢复" onClick={()=>onStatus(sub.id,'active')}><Play size={15}/></button>}<button title="归档" onClick={()=>onRemove(sub.id)}><Trash2 size={15}/></button></div></article>)}</section>
+    <section className="data-panel subscriptions-table"><div className="table-head"><span>订阅服务</span><span>分类</span><span>周期</span><span>下次续费</span><span>金额</span><span>状态</span><span /></div>{shown.map((sub)=><article className="table-row" key={sub.id}><div className="service-cell"><ServiceIcon item={sub}/><span><strong>{sub.name}</strong><small>{sub.plan}</small></span></div><span>{sub.category}</span><span>{cadenceLabel(sub)}</span><span>{sub.nextDate}</span><strong>{money(sub.amount,sub.currency)}</strong><StatusBadge status={sub.status}/><div className="row-actions">{sub.status === 'active' ? <button title="暂停" onClick={()=>onStatus(sub.id,'paused')}><Pause size={15}/></button> : <button title="恢复" onClick={()=>onStatus(sub.id,'active')}><Play size={15}/></button>}<button title="归档" onClick={()=>onRemove(sub.id)}><Trash2 size={15}/></button></div></article>)}</section>
     {shown.length === 0 && <div className="empty-state"><Search/><strong>没有找到订阅</strong><span>调整搜索或筛选条件后再试。</span></div>}
   </>;
 }
@@ -397,6 +384,58 @@ function SettingsView({ locale, setLocale, currency, setCurrency, t, token, user
   return <><PageHeader eyebrow="PREFERENCES" title={t.settings} description={t.settingsDesc}/><div className="settings-layout"><nav className="settings-nav" aria-label="设置分类"><button className={tab==='general'?'active':''} onClick={()=>setTab('general')}><Globe2/>通用</button><button className={tab==='notifications'?'active':''} onClick={()=>setTab('notifications')}><Bell/>通知</button><button className={tab==='security'?'active':''} onClick={()=>setTab('security')}><ShieldCheck/>账户与安全</button></nav><section className="settings-content">{tab==='general'&&<div className="settings-group"><h2>显示与地区</h2><SettingRow title="界面语言" description="更改界面中的文字语言"><select aria-label="界面语言" value={locale} onChange={(e)=>setLocale(e.target.value as Locale)}><option value="zh-CN">简体中文</option><option value="en">English</option></select></SettingRow><SettingRow title="基准货币" description="仪表盘和统计的默认折算货币"><select aria-label="基准货币" value={currency} onChange={(e)=>setCurrency(e.target.value)}>{Object.keys(rates).map((code)=><option key={code}>{code}</option>)}</select></SettingRow><SettingRow title="时区" description="用于界面中的日期和时间"><select aria-label="时区" value={timezone} onChange={(e)=>setTimezone(e.target.value)}><option>Asia/Shanghai</option><option>Asia/Hong_Kong</option><option>America/New_York</option><option>Europe/London</option></select></SettingRow></div>}{tab==='notifications'&&<form className="settings-group" onSubmit={saveNotificationSettings}><h2>通知渠道</h2><SettingRow title="应用内通知" description="续费提醒始终保留在通知中心"><span className="setting-value">始终启用</span></SettingRow><div className="notification-channel"><div className="channel-heading"><span className="channel-icon telegram"><Send/></span><div><strong>Telegram</strong><small>通过机器人发送续费提醒</small></div><button type="button" className={`toggle ${notificationSettings.telegram_enabled?'on':''}`} aria-label="启用 Telegram" aria-pressed={notificationSettings.telegram_enabled} onClick={()=>updateNotificationSetting('telegram_enabled',!notificationSettings.telegram_enabled)}><span/></button></div>{notificationSettings.telegram_enabled&&<div className="channel-fields"><label className="field"><span>Bot Token</span><input type="password" autoComplete="new-password" value={telegramToken} onChange={(e)=>setTelegramToken(e.target.value)} placeholder={notificationSettings.telegram_bot_token_configured?'已配置，留空保持不变':'从 BotFather 获取'}/></label><label className="field"><span>Chat ID</span><input value={notificationSettings.telegram_chat_id} onChange={(e)=>updateNotificationSetting('telegram_chat_id',e.target.value)} placeholder="例如：123456789"/></label></div>}</div><div className="notification-channel"><div className="channel-heading"><span className="channel-icon email"><Mail/></span><div><strong>邮件</strong><small>使用自有 SMTP 服务发送到登录邮箱</small></div><button type="button" className={`toggle ${notificationSettings.email_enabled?'on':''}`} aria-label="启用邮件" aria-pressed={notificationSettings.email_enabled} onClick={()=>updateNotificationSetting('email_enabled',!notificationSettings.email_enabled)}><span/></button></div>{notificationSettings.email_enabled&&<div className="channel-fields smtp-fields"><label className="field"><span>SMTP 主机</span><input value={notificationSettings.smtp_host} onChange={(e)=>updateNotificationSetting('smtp_host',e.target.value)} placeholder="smtp.example.com"/></label><label className="field"><span>端口</span><input type="number" min="1" max="65535" value={notificationSettings.smtp_port} onChange={(e)=>updateNotificationSetting('smtp_port',Number(e.target.value))}/></label><label className="field span-2"><span>发件人</span><input value={notificationSettings.smtp_from} onChange={(e)=>updateNotificationSetting('smtp_from',e.target.value)} placeholder="Renuxa <notifications@example.com>"/></label><label className="field"><span>用户名</span><input autoComplete="username" value={notificationSettings.smtp_username} onChange={(e)=>updateNotificationSetting('smtp_username',e.target.value)}/></label><label className="field"><span>密码</span><input type="password" autoComplete="new-password" value={smtpPassword} onChange={(e)=>setSmtpPassword(e.target.value)} placeholder={notificationSettings.smtp_password_configured?'已配置，留空保持不变':'SMTP 密码或密钥'}/></label><label className="tls-option"><input type="checkbox" checked={notificationSettings.smtp_tls} onChange={(e)=>updateNotificationSetting('smtp_tls',e.target.checked)}/><span>启用 TLS 加密连接</span></label></div>}</div><div className="reminder-row"><div><strong>提前提醒</strong><small>新订阅默认使用，可在单项中覆盖</small></div><div className="reminder-chips">{[14,7,3,1].map((day)=><button type="button" aria-pressed={reminders.includes(day)} key={day} className={reminders.includes(day)?'active':''} onClick={()=>setReminders(reminders.includes(day)?reminders.filter((v)=>v!==day):[...reminders,day].sort((a,b)=>b-a))}>{day} 天</button>)}</div></div><div className="settings-actions"><span className={saveState==='error'?'save-error':'save-status'}>{saveError||(saveState==='saved'?'设置已保存':'')}</span><button className="primary" disabled={!token||saveState==='saving'}>{saveState==='saving'?<RefreshCw className="spin"/>:<Check/>}保存设置</button></div></form>}{tab==='security'&&<div className="settings-group"><h2>账户与安全</h2><SettingRow title="当前账户" description={userEmail||'已连接 Renuxa 服务端'}><span className="setting-value">已登录</span></SettingRow><SettingRow title="退出登录" description="此设备上的订阅数据将在再次登录后同步"><button className="secondary" onClick={onLogout}>退出登录</button></SettingRow></div>}</section></div></>;
 }
 
+function WechatSettings({token}:{token:string|null}) {
+  const [status,setStatus]=useState<{enabled:boolean;bound:boolean}|null>(null);
+  const [code,setCode]=useState('');
+  const [qrStatus,setQrStatus]=useState('');
+  const [expires,setExpires]=useState('');
+  const [busy,setBusy]=useState(false);
+  const [error,setError]=useState('');
+  useEffect(()=>{
+    if(!token) return;
+    let active=true;
+    const load=()=>apiRequest<{enabled:boolean;bound:boolean}>('/integrations/wechat/binding',{},token).then(value=>{if(active){setStatus(value);if(value.bound)setCode('');}}).catch(reason=>{if(active)setError(reason.message);});
+    void load();
+    const timer=window.setInterval(()=>{void load();},15000);
+    return ()=>{active=false;window.clearInterval(timer);};
+  },[token]);
+  useEffect(()=>{
+    if(!code||!token) return;
+    let active=true;
+    let timer:ReturnType<typeof setTimeout>;
+    const poll=async()=>{
+      try {
+        const value=await apiRequest<{status:string}>('/integrations/wechat/qrcode/status',{},token);
+        if(!active)return;
+        if(value.status==='confirmed'){
+          setCode('');setQrStatus('绑定成功');setStatus({enabled:true,bound:true});return;
+        }
+        if(['expired','idle','stale'].includes(value.status)){
+          setCode('');setQrStatus('二维码已过期，请重新获取');return;
+        }
+        setQrStatus(value.status==='scaned'||value.status==='scanned'?'已扫码，请在微信确认':'等待微信扫码');
+        timer=setTimeout(()=>void poll(),2000);
+      }catch(reason){if(active){setError(reason instanceof Error?reason.message:'扫码状态查询失败');setCode('');}}
+    };
+    timer=setTimeout(()=>void poll(),2000);
+    const expiry=setTimeout(()=>{if(active){active=false;clearTimeout(timer);setCode('');setQrStatus('二维码已过期，请重新获取');}},300000);
+    return ()=>{active=false;clearTimeout(timer);clearTimeout(expiry);};
+  },[code,token]);
+  const action=async(unbind:boolean)=>{
+    setBusy(true);setError('');
+    try {
+      const timezone=JSON.parse(localStorage.getItem('renuxa.timezone')??'"Asia/Shanghai"');
+      const result=await apiRequest<{image:string;expires_in:number}>(`/integrations/wechat/${unbind?'binding':'qrcode'}`,{method:unbind?'DELETE':'POST',body:unbind?undefined:JSON.stringify({timezone})},token);
+      setCode(unbind?'':result.image);
+      setQrStatus(unbind?'':'等待微信扫码');
+      setExpires(unbind?'':new Date(Date.now()+result.expires_in*1000).toLocaleTimeString());
+      setStatus(await apiRequest<{enabled:boolean;bound:boolean}>('/integrations/wechat/binding',{},token));
+    } catch(reason){setError(reason instanceof Error?reason.message:'操作失败');}
+    finally{setBusy(false);}
+  };
+  return <section className="settings-group wechat-settings"><h2>微信接入</h2><SettingRow title={status?.bound?'已绑定':status?.enabled?'未绑定':'未启用'} description={code?`有效期至 ${expires}`:''}><button className="secondary" disabled={!token||!status?.enabled||busy} onClick={()=>void action(Boolean(status?.bound))}>{status?.bound?<Trash2 size={16}/>:<Plus size={16}/>} {busy?'处理中':status?.bound?'解绑':code?'刷新二维码':'扫码绑定微信'}</button></SettingRow>{code&&<div className="wechat-qr"><img src={code} alt="微信绑定二维码" width={240} height={240}/></div>}{qrStatus&&<p role="status">{qrStatus}</p>}{error&&<p className="save-error" role="alert">{error}</p>}</section>;
+}
+
 function SettingRow({ title, description, children }: { title:string; description:string; children:React.ReactNode }) { return <div className="setting-row"><div><strong>{title}</strong><small>{description}</small></div>{children}</div>; }
 
 function AddSubscriptionModal({ locale, onClose, onSave }: { locale:Locale; onClose:()=>void; onSave:(sub:Subscription)=>Promise<void> }) {
@@ -418,7 +457,7 @@ function AddSubscriptionModal({ locale, onClose, onSave }: { locale:Locale; onCl
     iconSearch.current.query = query;
     setIconBusy(true);setIconMessage('');
     try {
-      const results = await apiRequest(`/icons/search?q=${encodeURIComponent(query)}&country=cn`);
+      const results = await apiRequest<{name:string; developer:string; icon_url:string; bundle_id:string}[]>(`/icons/search?q=${encodeURIComponent(query)}&country=cn`);
       if (version !== iconSearch.current.version) return;
       setIconCandidates(results);setIconUrl(results[0]?.icon_url ?? '');
       if (!results.length) setIconMessage('未找到匹配图标');

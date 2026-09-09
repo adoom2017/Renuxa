@@ -12,7 +12,8 @@
     "start": "vinext start",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern dist-desktop --ignore-pattern .next --ignore-pattern target",
     "desktop:dev": "tauri dev",
-    "desktop:build": "tauri build"
+    "desktop:build": "tauri build",
+    "debug": "bash scripts/debug.sh"
   },
   "dependencies": {
     "lucide-react": "^1.38.0",

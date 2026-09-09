@@ -1,16 +1,9 @@
-# Local-build variant. Start with:
-#   docker compose -f docker-compose.build.yml up --build -d
-
-x-server-build: &server-build
-  build:
-    context: .
-    dockerfile: Dockerfile.server
+x-server-image: &server-image
+  image: adoom2018/renuxa-server:${RENUXA_VERSION:-0.1.2}
 
 services:
   web:
-    build:
-      context: .
-      dockerfile: Dockerfile.web
+    image: adoom2018/renuxa-web:${RENUXA_VERSION:-0.1.2}
     restart: unless-stopped
     init: true
     ports: ["3000:80"]
@@ -25,15 +18,19 @@ services:
       POSTGRES_DB: renuxa
     volumes: ["postgres-data:/var/lib/postgresql/data"]
     healthcheck: { test: ["CMD-SHELL", "pg_isready -U renuxa"], interval: 5s, timeout: 3s, retries: 12 }
-
   api:
-    <<: *server-build
+    <<: *server-image
     restart: unless-stopped
     init: true
     environment:
       DATABASE_URL: postgres://renuxa:renuxa@postgres:5432/renuxa
       JWT_SECRET: ${JWT_SECRET:-development-only-change-me}
-    ports: ["8080:8080"]
+      WECHAT_ENABLED: ${WECHAT_ENABLED:-false}
+      WECHAT_GATEWAY_URL: http://gateway:18765
+      WECHAT_GATEWAY_TOKEN: ${WECHAT_GATEWAY_TOKEN:-}
+      WECHAT_MODEL_URL: ${WECHAT_MODEL_URL:-}
+      WECHAT_MODEL_NAME: ${WECHAT_MODEL_NAME:-}
+      WECHAT_MODEL_API_KEY: ${WECHAT_MODEL_API_KEY:-}
     depends_on: { postgres: { condition: service_healthy } }
     healthcheck:
       test: ["CMD", "curl", "--fail", "--silent", "http://127.0.0.1:8080/health"]
@@ -41,9 +38,8 @@ services:
       timeout: 3s
       retries: 12
       start_period: 10s
-
   worker:
-    <<: *server-build
+    <<: *server-image
     restart: unless-stopped
     init: true
     command: ["renuxa-worker"]
@@ -51,12 +47,20 @@ services:
       DATABASE_URL: postgres://renuxa:renuxa@postgres:5432/renuxa
       JWT_SECRET: ${JWT_SECRET:-development-only-change-me}
     depends_on: { api: { condition: service_healthy } }
-
+  gateway:
+    <<: *server-image
+    profiles: ["wechat"]
+    restart: unless-stopped
+    init: true
+    command: ["im-channel-gateway", "--config", "/etc/renuxa/wechat.toml", "run"]
+    environment:
+      WECHAT_GATEWAY_TOKEN: ${WECHAT_GATEWAY_TOKEN:-}
+    volumes: ["wechat-data:/var/lib/renuxa-wechat"]
+    depends_on: { api: { condition: service_healthy } }
   mailpit:
     image: axllent/mailpit:latest
     profiles: ["mail"]
     restart: unless-stopped
-    ports: ["8025:8025", "1025:1025"]
-
 volumes:
   postgres-data:
+  wechat-data:

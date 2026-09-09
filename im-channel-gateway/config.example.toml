@@ -1,0 +1,108 @@
+# im-channel-gateway — standalone configuration (no QwenPaw required)
+# Copy to config.toml and edit.
+
+[data]
+dir = "~/.local/share/im-channel-gateway"
+
+[admin]
+listen = "127.0.0.1:18765"
+
+[agent]
+# echo | http_sse | cli | cli_router | codex_app_server
+backend = "echo"
+base_url = "http://127.0.0.1:8088"
+path = "/api/agent/process"
+agent_id = "default"
+bearer_token = ""
+language = "zh"
+# CLI backends (cli / cli_router)
+default_runner = "codex"
+command_prefix = "/"
+require_command_prefix = false
+
+[agent.security]
+# Empty = allow all senders (not recommended for production)
+allowed_senders = []
+max_run_secs = 600
+max_output_kb = 512
+workspace_root = ""
+
+# Codex app-server backend: connect to a running `codex app-server` on this Mac.
+# [agent]
+# backend = "codex_app_server"
+#
+# [agent.codex_app_server]
+# listen = "ws://127.0.0.1:4500"
+# token_file = ""   # optional: path to bearer token if using --ws-auth capability-token
+# model = "gpt-5.4"
+# default_cwd = "/path/to/your/project"
+# command_prefix = "/"
+# sandbox = "workspace-write"
+# approval_policy = "never"
+
+[agent.runners.codex]
+enabled = false
+command = "codex"
+# IM workspaces live under {data.dir}/workspaces/ (usually not a git repo).
+args = ["exec", "-s", "workspace-write", "--skip-git-repo-check"]
+prompt_via = "stdin"
+cwd = ""
+output_profile = "codex"
+
+[agent.runners.cursor]
+enabled = false
+command = "cursor"
+args = ["agent", "--print"]
+prompt_via = "last_arg"
+cwd = ""
+
+# Local test runner (no external CLI required):
+# [agent.runners.echo]
+# enabled = true
+# command = "echo"
+# args = []
+# prompt_via = "stdin"
+
+[channels.telegram]
+enabled = false
+# Legacy single-token field (registered into telegram_accounts.json on first start)
+bot_token = ""
+# Optional additional bot tokens to register at startup
+bot_tokens = []
+bot_prefix = ""
+# Non-empty: exported to HTTPS_PROXY for Telegram API (embed user:pass in URL if needed)
+http_proxy = ""
+http_proxy_auth = ""
+show_typing = true
+# true: editMessageText streaming (placeholder -> deltas -> final); see README.md
+streaming_enabled = false
+# In groups, only process messages that @mention the bot or use /commands
+require_mention = false
+filter_tool_messages = false
+filter_thinking = false
+access_control_dm = false
+access_control_group = false
+# Inbound media download dir; default {data.dir}/media/telegram
+media_dir = ""
+# Maximum concurrently active Telegram bot accounts
+max_accounts = 20
+
+[channels.wechat]
+enabled = false
+# Renuxa mode: verified inline images and acknowledge-after-delivery polling.
+inline_images = false
+# Legacy single-token fields (migrated into wechat_accounts.json on first start)
+bot_token = ""
+bot_token_file = ""
+base_url = ""
+bot_type = "3"
+bot_prefix = ""
+media_dir = ""
+# Maximum concurrently active WeChat bot accounts (dynamic QR registration)
+max_accounts = 20
+# true: deliver completed Codex/app-server message segments to IM (auto-enabled for agent.backend = codex_app_server)
+streaming_enabled = false
+message_merge_enabled = false
+message_merge_delay_ms = 0
+access_control_dm = false
+access_control_group = false

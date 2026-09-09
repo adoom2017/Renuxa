@@ -24,7 +24,7 @@ pub struct Subscription {
     pub updated_at: DateTime<Utc>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreateSubscription {
     pub name: String,
     pub plan_name: Option<String>,

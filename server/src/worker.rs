@@ -8,6 +8,15 @@ use sqlx::Row;
 use uuid::Uuid;
 
 pub async fn run_cycle(state: &AppState) -> Result<(), sqlx::Error> {
+    sqlx::query("DELETE FROM wechat_drafts WHERE expires_at <= now()")
+        .execute(&state.db)
+        .await?;
+    sqlx::query("DELETE FROM wechat_binding_codes WHERE expires_at <= now()")
+        .execute(&state.db)
+        .await?;
+    sqlx::query("DELETE FROM wechat_rate_limits WHERE window_start < now()-interval '1 day'")
+        .execute(&state.db)
+        .await?;
     let mut tx = state.db.begin().await?;
     let reminders = sqlx::query("SELECT s.id,s.user_id,s.name,s.amount,s.currency,s.next_billing_date,r.days_before FROM subscriptions s JOIN subscription_reminders r ON r.subscription_id=s.id WHERE s.status='active' AND s.next_billing_date-r.days_before <= current_date AND s.next_billing_date >= current_date FOR UPDATE OF s SKIP LOCKED LIMIT 300")
         .fetch_all(&mut *tx).await?;

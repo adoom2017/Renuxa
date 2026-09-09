@@ -41,3 +41,6 @@ next-env.d.ts
 /work/
 /.openai/
 /dogfood-output/
+/im-channel-gateway/config.toml
+/im-channel-gateway/data/
+*.tsbuildinfo

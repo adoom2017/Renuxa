@@ -62,3 +62,7 @@ button:focus-visible,input:focus-visible,select:focus-visible { outline:2px soli
 .icon-candidate strong,.icon-candidate small{display:block;font-size:11px;line-height:1.4}
 .icon-candidate small{margin-top:3px;color:var(--muted);font-size:10px}
 @media(max-width:420px){.icon-candidate-grid{grid-template-columns:minmax(0,1fr)}}
+.wechat-settings { margin-top: 24px; }
+.wechat-binding-code { overflow-wrap: anywhere; font-family: monospace; user-select: all; }
+.wechat-qr { display: flex; justify-content: center; padding: 16px 0; }
+.wechat-qr img { width: 240px; height: auto; max-width: 100%; aspect-ratio: 1; image-rendering: pixelated; background: white; }

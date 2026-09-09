@@ -1,0 +1,19 @@
+[data]
+dir = "/var/lib/renuxa-wechat"
+[admin]
+listen = "0.0.0.0:18765"
+[agent]
+backend = "http_sse"
+base_url = "http://api:8080"
+path = "/api/integrations/wechat/process"
+agent_id = "renuxa-wechat"
+# WECHAT_GATEWAY_TOKEN is injected from the environment.
+bearer_token = ""
+[channels.wechat]
+enabled = true
+inline_images = true
+streaming_enabled = false
+message_merge_enabled = false
+max_accounts = 1
+[channels.telegram]
+enabled = false

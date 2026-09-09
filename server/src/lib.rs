@@ -2,6 +2,8 @@ pub mod auth;
 pub mod error;
 pub mod models;
 pub mod routes;
+pub mod subscriptions;
+pub mod wechat;
 pub mod worker;
 
 use axum::{Router, routing::get};

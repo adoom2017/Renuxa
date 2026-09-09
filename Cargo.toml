@@ -1,5 +1,5 @@
 [workspace]
-members = ["server", "src-tauri"]
+members = ["server", "src-tauri", "im-channel-gateway"]
 resolver = "2"
 
 [workspace.package]

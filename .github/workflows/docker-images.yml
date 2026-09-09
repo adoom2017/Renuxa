@@ -62,9 +62,9 @@ jobs:
       matrix:
         include:
           - image: renuxa-web
-            dockerfile: Dockerfile.web
+            dockerfile: docker/Dockerfile.web
           - image: renuxa-server
-            dockerfile: Dockerfile.server
+            dockerfile: docker/Dockerfile.server
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
