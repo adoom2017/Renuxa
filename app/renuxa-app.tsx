@@ -6,6 +6,7 @@ import {
   RefreshCw, Search, Settings, ShieldCheck, SlidersHorizontal, Trash2,
   WalletCards, X,
 } from 'lucide-react';
+import Image from 'next/image';
 import { FormEvent, useEffect, useRef, useState } from 'react';
 import { billingDates, cadenceLabel, cadenceUnit } from './billing';
 
@@ -218,7 +219,7 @@ export default function RenuxaApp() {
     <main className="app-shell">
       <aside className={`sidebar ${mobileNav ? 'open' : ''}`}>
         <button className="brand" onClick={() => changeView('dashboard')} aria-label="续序首页">
-          <span className="brand-mark"><img src="/renuxa-logo.svg" alt="" /></span><span><strong>续序</strong><small>Renuxa</small></span>
+          <span className="brand-mark"><Image src="/renuxa-logo.svg" alt="" width={39} height={39} priority /></span><span><strong>续序</strong><small>Renuxa</small></span>
         </button>
         <nav className="nav" aria-label="主导航">
           {nav.map(({ id, icon: Icon }, index) => <button key={id} className={view === id ? 'active' : ''} onClick={() => changeView(id)}>
@@ -229,7 +230,7 @@ export default function RenuxaApp() {
       </aside>
 
       <section className="content">
-        <div className="mobile-topbar"><button onClick={() => setMobileNav(!mobileNav)} aria-label="打开菜单"><Menu /></button><strong><img src="/renuxa-logo.svg" alt="Renuxa" />续序</strong><button onClick={() => setModalOpen(true)} aria-label={t.add}><Plus /></button></div>
+        <div className="mobile-topbar"><button onClick={() => setMobileNav(!mobileNav)} aria-label="打开菜单"><Menu /></button><strong><Image src="/renuxa-logo.svg" alt="Renuxa" width={25} height={25} priority />续序</strong><button onClick={() => setModalOpen(true)} aria-label={t.add}><Plus /></button></div>
         {view === 'dashboard' && <Dashboard subscriptions={subscriptions} bills={bills} currency={baseCurrency} t={t} onAdd={() => setModalOpen(true)} onView={changeView} />}
         {view === 'subscriptions' && <><div className="row-actions"><button title="刷新订阅" aria-label="刷新订阅" onClick={()=>setRefreshVersion(v=>v+1)}><RefreshCw size={18}/></button></div>{refreshError&&<p role="alert">{refreshError}</p>}<SubscriptionsView subscriptions={subscriptions} t={t} onAdd={() => setModalOpen(true)} onStatus={updateStatus} onRemove={removeSubscription} /></>}
         {view === 'bills' && <BillsView bills={bills} t={t} onUpdate={updateBill} />}
@@ -244,7 +245,7 @@ export default function RenuxaApp() {
 function AuthScreen({ onAuthenticated }: { onAuthenticated:(session:{ access_token:string; email:string })=>void }) {
   const [mode,setMode]=useState<'login'|'register'>('login'); const [email,setEmail]=useState(''); const [password,setPassword]=useState(''); const [error,setError]=useState(''); const [busy,setBusy]=useState(false);
   const submit=async(event:FormEvent)=>{event.preventDefault();setBusy(true);setError('');try{const result=await apiRequest<{access_token:string;email:string}>(`/auth/${mode}`,{method:'POST',body:JSON.stringify({email,password})});onAuthenticated(result);}catch(reason){setError(reason instanceof Error?reason.message:'请求失败');}finally{setBusy(false);}};
-  return <main className="auth-shell"><section className="auth-brand"><span className="brand-mark"><img src="/renuxa-logo.svg" alt="" /></span><div><strong>续序</strong><small>Renuxa</small></div><h1>让每一次续费，<br/>都心中有数</h1><p>订阅、账单、汇率和提醒，在同一处保持有序。</p></section><section className="auth-form-wrap"><form className="auth-form" onSubmit={submit}><p>RENuxa ACCOUNT</p><h2>{mode==='login'?'登录续序':'创建账户'}</h2><span>{mode==='login'?'继续管理你的所有订阅':'开始建立清晰的订阅账本'}</span><label className="field"><b>邮箱</b><input type="email" required value={email} onChange={(e)=>setEmail(e.target.value)} placeholder="name@example.com"/></label><label className="field"><b>密码</b><input type="password" required minLength={10} value={password} onChange={(e)=>setPassword(e.target.value)} placeholder="至少 10 位"/></label>{error&&<div className="form-error">{error}</div>}<button className="primary auth-submit" disabled={busy}>{busy?<RefreshCw className="spin"/>:mode==='login'?'登录':'注册'}</button><button className="auth-switch" type="button" onClick={()=>{setMode(mode==='login'?'register':'login');setError('')}}>{mode==='login'?'没有账户？创建一个':'已有账户？返回登录'}</button></form></section></main>;
+  return <main className="auth-shell"><section className="auth-brand"><span className="brand-mark"><Image src="/renuxa-logo.svg" alt="" width={39} height={39} priority /></span><div><strong>续序</strong><small>Renuxa</small></div><h1>让每一次续费，<br/>都心中有数</h1><p>订阅、账单、汇率和提醒，在同一处保持有序。</p></section><section className="auth-form-wrap"><form className="auth-form" onSubmit={submit}><p>RENuxa ACCOUNT</p><h2>{mode==='login'?'登录续序':'创建账户'}</h2><span>{mode==='login'?'继续管理你的所有订阅':'开始建立清晰的订阅账本'}</span><label className="field"><b>邮箱</b><input type="email" required value={email} onChange={(e)=>setEmail(e.target.value)} placeholder="name@example.com"/></label><label className="field"><b>密码</b><input type="password" required minLength={10} value={password} onChange={(e)=>setPassword(e.target.value)} placeholder="至少 10 位"/></label>{error&&<div className="form-error">{error}</div>}<button className="primary auth-submit" disabled={busy}>{busy?<RefreshCw className="spin"/>:mode==='login'?'登录':'注册'}</button><button className="auth-switch" type="button" onClick={()=>{setMode(mode==='login'?'register':'login');setError('')}}>{mode==='login'?'没有账户？创建一个':'已有账户？返回登录'}</button></form></section></main>;
 }
 
 function PageHeader({ eyebrow, title, description, action }: { eyebrow: string; title: string; description?: string; action?: React.ReactNode }) {
@@ -433,7 +434,7 @@ function WechatSettings({token}:{token:string|null}) {
     } catch(reason){setError(reason instanceof Error?reason.message:'操作失败');}
     finally{setBusy(false);}
   };
-  return <section className="settings-group wechat-settings"><h2>微信接入</h2><SettingRow title={status?.bound?'已绑定':status?.enabled?'未绑定':'未启用'} description={code?`有效期至 ${expires}`:''}><button className="secondary" disabled={!token||!status?.enabled||busy} onClick={()=>void action(Boolean(status?.bound))}>{status?.bound?<Trash2 size={16}/>:<Plus size={16}/>} {busy?'处理中':status?.bound?'解绑':code?'刷新二维码':'扫码绑定微信'}</button></SettingRow>{code&&<div className="wechat-qr"><img src={code} alt="微信绑定二维码" width={240} height={240}/></div>}{qrStatus&&<p role="status">{qrStatus}</p>}{error&&<p className="save-error" role="alert">{error}</p>}</section>;
+  return <section className="settings-group wechat-settings"><h2>微信接入</h2><SettingRow title={status?.bound?'已绑定':status?.enabled?'未绑定':'未启用'} description={code?`有效期至 ${expires}`:''}><button className="secondary" disabled={!token||!status?.enabled||busy} onClick={()=>void action(Boolean(status?.bound))}>{status?.bound?<Trash2 size={16}/>:<Plus size={16}/>} {busy?'处理中':status?.bound?'解绑':code?'刷新二维码':'扫码绑定微信'}</button></SettingRow>{code&&<div className="wechat-qr"><Image src={code} alt="微信绑定二维码" width={240} height={240} unoptimized /></div>}{qrStatus&&<p role="status">{qrStatus}</p>}{error&&<p className="save-error" role="alert">{error}</p>}</section>;
 }
 
 function SettingRow({ title, description, children }: { title:string; description:string; children:React.ReactNode }) { return <div className="setting-row"><div><strong>{title}</strong><small>{description}</small></div>{children}</div>; }
