@@ -80,7 +80,7 @@ cp .env.example .env
 JWT_SECRET=replace-with-a-long-random-secret
 ```
 
-拉取指定版本的预构建镜像并启动：
+拉取最新的预构建镜像并启动：
 
 ```bash
 docker compose --env-file .env -f docker/compose.yml pull
@@ -93,7 +93,7 @@ docker compose --env-file .env -f docker/compose.yml up -d
 docker compose --env-file .env -f docker/compose.build.yml up --build -d
 ```
 
-默认部署版本为 `0.1.2`。升级时可在 `.env` 中设置 `RENUXA_VERSION`，再重新拉取并启动。
+正式 Compose 默认使用 `latest` 标签；如需固定版本，可在 `.env` 中设置 `RENUXA_VERSION`。升级时先执行 `docker compose pull`，再重新启动服务，避免继续使用本地缓存的旧镜像。
 
 ### 发布 Docker 镜像
 

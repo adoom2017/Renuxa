@@ -50,8 +50,8 @@ docker compose --env-file .env -f docker/compose.build.yml up -d gateway
 
 扫码登录命令会在终端显示二维码，并写入独立 `wechat-data` 卷。
 登录 CLI 完成后再启动 gateway，避免并发修改账号注册文件。
-镜像发布后，改用 `-f docker/compose.yml` 并设置同一个
-`RENUXA_VERSION` 使用预构建镜像。现有 amd64/arm64 发布流程无需变更。
+镜像发布后，改用 `-f docker/compose.yml` 拉取预构建镜像；默认标签为
+`latest`，也可通过 `RENUXA_VERSION` 指定版本。现有 amd64/arm64 发布流程无需变更。
 
 如需生成通用配置，可运行：
 

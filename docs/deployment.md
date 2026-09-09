@@ -30,6 +30,9 @@ npm run debug
 
 ## 预构建镜像
 
+正式 Compose 默认使用 Docker Hub 的 `latest` 标签；在 `.env` 中设置
+`RENUXA_VERSION` 可指定版本。每次升级先拉取镜像：
+
 ```bash
 docker compose --env-file .env -f docker/compose.yml pull
 docker compose --env-file .env -f docker/compose.yml up -d
