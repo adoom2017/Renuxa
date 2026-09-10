@@ -19,7 +19,6 @@ pub(super) fn router() -> Router<AppState> {
 #[derive(Deserialize)]
 struct IconQuery {
     q: String,
-    country: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -90,7 +89,7 @@ async fn search_icons(
             ("term", query.q.as_str()),
             ("entity", "software"),
             ("limit", "8"),
-            ("country", query.country.as_deref().unwrap_or("cn")),
+            ("country", "us"),
         ])
         .send()
         .await

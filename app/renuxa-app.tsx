@@ -1,18 +1,20 @@
 'use client';
 
 import {
-  Bell, CalendarDays, Check, ChevronLeft, ChevronRight, CircleDollarSign, CreditCard, Globe2,
+  Bell, CalendarDays, Check, ChevronLeft, ChevronRight, CreditCard, Globe2,
   LayoutDashboard, Menu, Pause, Pencil, Play, Plus, ReceiptText, Send,
   RefreshCw, Search, Settings, ShieldCheck, SlidersHorizontal, Trash2,
-  WalletCards, X,
+  X,
 } from 'lucide-react';
 import { FormEvent, useEffect, useRef, useState } from 'react';
 import type { View, Status, BillStatus, Locale, Subscription, Bill, Notice, NotificationSettings } from './models';
 import { seedSubscriptions, seedBills, seedNotices } from './demo-data';
-import { rates, currencySymbols, colors } from './constants';
+import { rates, colors } from './constants';
 import { apiUrl, apiRequest, remoteSubscription } from './api';
 import { copy } from './copy';
 import { useStoredState } from './use-stored-state';
+import { money } from './format';
+import { BillsView } from './bills-view';
 import { billingDates, cadenceLabel, cadenceUnit } from './billing';
 
 function AppImage({ src, alt, width, height, priority = false }: { src: string; alt: string; width: number; height: number; priority?: boolean }) {
@@ -24,10 +26,6 @@ function createLocalId() {
   // getRandomValues also works when a self-hosted instance is accessed over HTTP.
   return Array.from(crypto.getRandomValues(new Uint8Array(16)), (byte) => byte.toString(16).padStart(2, '0')).join('');
 }
-function money(amount: number, currency: string) {
-  return `${currencySymbols[currency] ?? `${currency} `}${amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-}
-
 function iconSource(iconUrl?: string) {
   if (!iconUrl || !apiUrl) return iconUrl;
   try {
@@ -78,6 +76,7 @@ export default function RenuxaApp() {
   const [mobileNav, setMobileNav] = useState(false);
   const [refreshVersion, setRefreshVersion] = useState(0);
   const [refreshError, setRefreshError] = useState('');
+  const [loadedToken, setLoadedToken] = useState<string | null>(null);
   const t = copy[locale];
   const unread = notices.filter((notice) => !notice.read).length;
 
@@ -89,14 +88,18 @@ export default function RenuxaApp() {
 
   useEffect(() => {
     if (!apiUrl || !token) return;
+    let cancelled = false;
     Promise.all([
       apiRequest<Record<string,unknown>[]>('/subscriptions', {}, token), apiRequest<Record<string,unknown>[]>('/bills', {}, token), apiRequest<Record<string,unknown>[]>('/notifications', {}, token),
     ]).then(([remoteSubs, remoteBills, remoteNotices]) => {
+      if (cancelled) return;
+      setLoadedToken(token);
       setRefreshError('');
       setSubscriptions((remoteSubs as Record<string, unknown>[]).map(remoteSubscription));
-      setBills((remoteBills as Record<string, unknown>[]).map((row) => ({ id:String(row.id), subscription:String(row.subscription_name), date:String(row.due_date), amount:Number(row.amount), currency:String(row.currency), status:String(row.status) as BillStatus })));
+      setBills((remoteBills as Record<string, unknown>[]).map((row) => ({ id:String(row.id), subscriptionId:String(row.subscription_id), subscription:String(row.subscription_name), date:String(row.due_date), amount:Number(row.amount), currency:String(row.currency), status:String(row.status) as BillStatus })));
       setNotices((remoteNotices as Record<string, unknown>[]).map((row) => ({ id:String(row.id), title:String(row.title), body:String(row.body), date:new Date(String(row.scheduled_for)).toLocaleString(), read:Boolean(row.read_at), kind:String(row.kind)==='renewal'?'renewal':'system' })));
-    }).catch((error) => { if(error?.status===401) setToken(null); else setRefreshError(error instanceof Error?error.message:'刷新失败'); });
+    }).catch((error) => { if (cancelled) return; if(error?.status===401) setToken(null); else setRefreshError(error instanceof Error?error.message:'刷新失败'); });
+    return () => { cancelled = true; };
   }, [token, view, refreshVersion, setBills, setNotices, setSubscriptions, setToken]);
 
   const nav: { id: View; icon: typeof LayoutDashboard }[] = [
@@ -118,7 +121,11 @@ export default function RenuxaApp() {
   };
   const updateStatus = (id: string, status: Status) => { setSubscriptions((current) => current.map((sub) => sub.id === id ? { ...sub, status } : sub)); if(token) void apiRequest(`/subscriptions/${id}`, {method:'PATCH',body:JSON.stringify({status})}, token).catch(()=>undefined); };
   const removeSubscription = (id: string) => { setSubscriptions((current) => current.filter((sub) => sub.id !== id)); if(token) void apiRequest(`/subscriptions/${id}`, {method:'DELETE'}, token).catch(()=>undefined); };
-  const updateBill = (id:string,status:BillStatus) => { setBills((all) => all.map((bill) => bill.id === id ? { ...bill, status } : bill)); if(token) void apiRequest(`/bills/${id}`, {method:'PATCH',body:JSON.stringify({status})}, token).catch(()=>undefined); };
+  const updateBill = async (id:string,status:BillStatus) => {
+    if (apiUrl) await apiRequest(`/bills/${id}`, {method:'PATCH',body:JSON.stringify({status})}, token);
+    setBills((all) => all.map((bill) => bill.id === id ? { ...bill, status } : bill));
+    setRefreshVersion((version) => version + 1);
+  };
   const readNotice = (id:string) => { setNotices((all) => all.map((n) => n.id === id ? { ...n, read: true } : n)); if(token) void apiRequest(`/notifications/${id}/read`, {method:'POST'}, token).catch(()=>undefined); };
   const readAllNotices = () => {
     const unreadIds = notices.filter((notice) => !notice.read).map((notice) => notice.id);
@@ -128,6 +135,8 @@ export default function RenuxaApp() {
 
   if (apiUrl && !tokenReady) return <div className="app-loading" aria-hidden="true" />;
   if (apiUrl && !token) return <AuthScreen onAuthenticated={(session) => { setToken(session.access_token); setUserEmail(session.email); }} />;
+
+  if (apiUrl && loadedToken !== token) return <main className="auth-shell"><section role="status"><p>{refreshError || '正在加载账户数据…'}</p>{refreshError && <button className="secondary" onClick={()=>setRefreshVersion(v=>v+1)}>重试</button>}</section></main>;
 
   return (
     <main className="app-shell">
@@ -147,7 +156,7 @@ export default function RenuxaApp() {
         <div className="mobile-topbar"><button onClick={() => setMobileNav(!mobileNav)} aria-label="打开菜单"><Menu /></button><strong><AppImage src="/renuxa-logo.svg" alt="Renuxa" width={25} height={25} priority />续序</strong><button onClick={() => setModalOpen(true)} aria-label={t.add}><Plus /></button></div>
         {view === 'dashboard' && <Dashboard subscriptions={subscriptions} bills={bills} currency={baseCurrency} t={t} onAdd={() => setModalOpen(true)} onView={changeView} />}
         {view === 'subscriptions' && <><div className="row-actions"><button title="刷新订阅" aria-label="刷新订阅" onClick={()=>setRefreshVersion(v=>v+1)}><RefreshCw size={18}/></button></div>{refreshError&&<p role="alert">{refreshError}</p>}<SubscriptionsView subscriptions={subscriptions} t={t} onAdd={() => {setEditingSubscription(null);setModalOpen(true);}} onEdit={(sub) => {setEditingSubscription(sub);setModalOpen(true);}} onStatus={updateStatus} onRemove={removeSubscription} /></>}
-        {view === 'bills' && <BillsView bills={bills} t={t} onUpdate={updateBill} />}
+        {view === 'bills' && <BillsView bills={bills} subscriptions={subscriptions} currency={baseCurrency} token={token} t={t} onUpdate={updateBill} onRefresh={()=>setRefreshVersion(v=>v+1)} refreshError={refreshError} />}
         {view === 'notifications' && <NotificationsView notices={notices} t={t} onRead={readNotice} onReadAll={readAllNotices} />}
         {view === 'settings' && <><SettingsView locale={locale} setLocale={setLocale} currency={baseCurrency} setCurrency={setBaseCurrency} t={t} token={token} userEmail={userEmail} onLogout={() => { setToken(null); setUserEmail(''); }} /><WechatSettings token={token}/></>}
       </section>
@@ -237,14 +246,6 @@ function SubscriptionsView({ subscriptions, t, onAdd, onEdit, onStatus, onRemove
 }
 
 function StatusBadge({ status }: { status: Status }) { const labels={active:'使用中',paused:'已暂停',cancelled:'已取消'}; return <span className={`status ${status}`}>{labels[status]}</span>; }
-function BillBadge({ status }: { status: BillStatus }) { const labels={estimated:'待确认',paid:'已支付',skipped:'未扣款',refunded:'已退款'}; return <span className={`status ${status}`}>{labels[status]}</span>; }
-
-function BillsView({ bills, t, onUpdate }: { bills: Bill[]; t: typeof copy['zh-CN']; onUpdate:(id:string,status:BillStatus)=>void }) {
-  const [filter,setFilter]=useState<'all'|BillStatus>('all'); const shown=bills.filter((b)=>filter==='all'||b.status===filter);
-  const total=bills.filter((b)=>b.status==='paid').reduce((sum,b)=>sum+b.amount*(rates[b.currency]??0),0);
-  return <><PageHeader eyebrow="BILLING" title={t.bills} description={t.billsDesc}/><div className="bill-summary"><div><CircleDollarSign/><span>今年已支付<small>按 CNY 折算</small></span><strong>{money(total,'CNY')}</strong></div><div><CalendarDays/><span>待确认账单<small>未来 30 天</small></span><strong>{bills.filter((b)=>b.status==='estimated').length}</strong></div><div><WalletCards/><span>记录总数<small>全部币种</small></span><strong>{bills.length}</strong></div></div><div className="segmented">{(['all','estimated','paid','skipped','refunded'] as const).map((value)=><button className={filter===value?'active':''} key={value} onClick={()=>setFilter(value)}>{value==='all'?'全部':{estimated:'待确认',paid:'已支付',skipped:'未扣款',refunded:'已退款'}[value]}</button>)}</div><section className="data-panel bills-table"><div className="table-head"><span>订阅</span><span>账单日</span><span>原币金额</span><span>折合 CNY</span><span>状态</span><span /></div>{shown.map((bill)=><article className="table-row" key={bill.id}><strong>{bill.subscription}</strong><span>{bill.date}</span><strong>{money(bill.amount,bill.currency)}</strong><span>{money(bill.amount*(rates[bill.currency]??0),'CNY')}</span><BillBadge status={bill.status}/><div className="bill-action">{bill.status==='estimated'&&<button onClick={()=>onUpdate(bill.id,'paid')}><Check size={14}/>确认支付</button>}</div></article>)}</section>{shown.length === 0 && <div className="empty-state"><ReceiptText/><strong>暂无账单记录</strong><span>{filter === 'all' ? '订阅到期后，账单会自动记录在这里。' : '当前筛选条件下没有账单。'}</span></div>}</>;
-}
-
 function NotificationsView({ notices, t, onRead, onReadAll }: { notices: Notice[]; t: typeof copy['zh-CN']; onRead:(id:string)=>void; onReadAll:()=>void }) {
   return <><PageHeader eyebrow="INBOX" title={t.notifications} description={t.noticesDesc} action={<button className="secondary" onClick={onReadAll} disabled={!notices.some((notice) => !notice.read)}><Check size={16}/>{t.markAll}</button>}/>{notices.length > 0 ? <section className="notification-list">{notices.map((notice)=><button key={notice.id} className={`notification-item ${notice.read?'read':''}`} onClick={()=>onRead(notice.id)}><span className={`notification-kind ${notice.kind}`}>{notice.kind==='renewal'?<RefreshCw/>:notice.kind==='bill'?<ReceiptText/>:<Globe2/>}</span><span className="notification-copy"><strong>{notice.title}</strong><small>{notice.body}</small></span><time>{notice.date}</time>{!notice.read&&<i/>}</button>)}</section> : <div className="empty-state page-empty"><Bell/><strong>暂无通知</strong><span>续费提醒和账单消息会显示在这里。</span></div>}</>;
 }
@@ -362,7 +363,7 @@ function SubscriptionModal({ locale, initial, onClose, onSave }: { locale:Locale
     iconSearch.current.query = query;
     setIconBusy(true);setIconMessage('');
     try {
-      const results = await apiRequest<{name:string; developer:string; icon_url:string; bundle_id:string}[]>(`/icons/search?q=${encodeURIComponent(query)}&country=cn`);
+      const results = await apiRequest<{name:string; developer:string; icon_url:string; bundle_id:string}[]>(`/icons/search?q=${encodeURIComponent(query)}`);
       if (version !== iconSearch.current.version) return;
       setIconCandidates(results);setIconUrl(results[0]?.icon_url ?? '');
       if (!results.length) setIconMessage('未找到匹配图标');

@@ -17,7 +17,7 @@ HTTP SSE 接口向 API 投递微信消息；API 通过 Gateway 管理接口创�
 
 ## 代码组织
 
-- `app/renuxa-app.tsx` 组合产品界面；`models.ts` 定义共用类型，`api.ts` 负责
+- `app/renuxa-app.tsx` 组合产品界面，`bills-view.tsx` 展示账单与未来扣款预估；`models.ts` 定义共用类型，`api.ts` 负责
   请求和服务端数据映射，`billing.ts` 负责计费日期，`use-stored-state.ts` 管理本地持久化。
 - `app/demo-data.ts` 隔离离线示例数据；`copy.ts` 和 `constants.ts` 保存文案与显示常量。
 - `server/src/routes.rs` 组装业务路由，`routes/icons.rs` 封装图标搜索和代理；
@@ -44,6 +44,16 @@ Worker 每分钟扫描 `subscriptions` 和 `subscription_reminders`。达到提�
 `notifications` 和相应 `notification_deliveries`；到扣款日创建预计账单并推进周期。
 微信对话中的“快过期”定义为：有效订阅的当前 `next_billing_date` 已存在对应的
 `reminder:<subscription>:<date>:<days>` 通知记录。
+
+## 账单展示
+
+Worker 在扣款日生成待确认账单，前端只在保存成功后显示“已支付”。账单页按账单日
+统计本年已支付记录；待确认数量包含逾期账单。API 当前返回最近 200 条记录，达到
+上限时页面提示统计范围。未来 30 天预估单独根据有效订阅计算，不早于下次扣款日，
+已入账的同订阅同日期不会重复展示；预估不能直接确认支付。
+在线账单使用 `/api/exchange-rates` 的参考汇率和用户选择的基准货币；缺少汇率时
+保留原币金额并提示不可折算，不回退到演示汇率。账户首次加载成功前不显示本地缓存
+或示例账单，刷新失败会提示错误。
 
 ## 主要数据表
 

@@ -1,3 +1,5 @@
+import type { Bill, Subscription } from './models';
+
 type BillingSchedule = { cadence: string; nextDate: string; cadenceInterval?: number; anchorDay?: number };
 
 function addBillingMonths(date: Date, months: number) {
@@ -38,4 +40,36 @@ export function billingDates(sub: BillingSchedule, start: Date, end: Date) {
   const dates:Date[]=[];
   for(let date=occurrence(index);date<end;date=occurrence(++index)) if(date>=start) dates.push(date);
   return dates;
+}
+
+
+export function billSummary(bills: Bill[], now = new Date()) {
+  const year = String(now.getFullYear());
+  return {
+    paidThisYear: bills.filter((bill) => bill.status === 'paid' && bill.date.slice(0, 4) === year),
+    pending: bills.filter((bill) => bill.status === 'estimated').length,
+  };
+}
+
+// Forecasts are display-only. Only the server's generated bills can be confirmed.
+export function upcomingBills(subscriptions: Subscription[], bills: Bill[], now = new Date()) {
+  const start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const end = new Date(start.getFullYear(), start.getMonth(), start.getDate() + 30);
+  const recorded = new Set(bills.map((bill) => `${bill.subscriptionId}:${bill.date}`));
+  return subscriptions.filter((sub) => sub.status === 'active').flatMap((sub) => {
+    const next = new Date(`${sub.nextDate}T00:00:00`);
+    // billingDates also projects historical periods for dashboard charts; forecasts must not.
+    const from = next > start ? next : start;
+    return billingDates(sub, from, end).map((date) => {
+      const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+      return { id: `${sub.id}:${key}`, subscriptionId: sub.id, subscription: sub.name, date: key, amount: sub.amount, currency: sub.currency };
+    }).filter((bill) => !recorded.has(bill.id));
+  }).sort((a, b) => a.date.localeCompare(b.date) || a.subscription.localeCompare(b.subscription));
+}
+
+export function convertBillAmount(amount: number, source: string, target: string, exchangeRates: Record<string, number>): number | null {
+  if (source === target) return amount;
+  const from = exchangeRates[source];
+  const to = exchangeRates[target];
+  return Number.isFinite(from) && from > 0 && Number.isFinite(to) && to > 0 ? amount / from * to : null;
 }

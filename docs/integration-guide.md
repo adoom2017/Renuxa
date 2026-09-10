@@ -17,7 +17,7 @@ API 默认监听容器内 `8080`。本地构建 Compose 默认发布到
 | `GET` | `/api/notifications` | 查询通知 |
 | `POST` | `/api/notifications/{id}/read` | 标记通知已读 |
 | `GET, PUT` | `/api/notification-settings` | 获取或更新通知渠道 |
-| `GET` | `/api/icons/search` | 搜索订阅图标 |
+| `GET` | `/api/icons/search` | 搜索美国区 App Store 订阅图标（固定 `country=us`） |
 | `GET` | `/api/icons/image` | 代理允许来源的图标 |
 | `GET` | `/api/exchange-rates` | 查询汇率 |
 | `GET` | `/api/dashboard` | 获取仪表盘汇总 |
