@@ -8,3 +8,10 @@ dogfood-output
 *.log
 .env
 .env.*
+.next
+.vinext
+.openai
+outputs
+work
+*.tsbuildinfo
+.DS_Store

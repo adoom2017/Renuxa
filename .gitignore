@@ -44,3 +44,6 @@ next-env.d.ts
 /im-channel-gateway/config.toml
 /im-channel-gateway/data/
 *.tsbuildinfo
+
+# Tauri regenerates platform schemas during native builds
+/src-tauri/gen/schemas/

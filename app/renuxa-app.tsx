@@ -7,50 +7,14 @@ import {
   WalletCards, X,
 } from 'lucide-react';
 import { FormEvent, useEffect, useRef, useState } from 'react';
+import type { View, Status, BillStatus, Locale, Subscription, Bill, Notice, NotificationSettings } from './models';
+import { seedSubscriptions, seedBills, seedNotices } from './demo-data';
+import { rates, currencySymbols, colors } from './constants';
+import { apiUrl, apiRequest, remoteSubscription } from './api';
+import { copy } from './copy';
+import { useStoredState } from './use-stored-state';
 import { billingDates, cadenceLabel, cadenceUnit } from './billing';
 
-type View = 'dashboard' | 'subscriptions' | 'bills' | 'notifications' | 'settings';
-type Status = 'active' | 'paused' | 'cancelled';
-type BillStatus = 'estimated' | 'paid' | 'skipped' | 'refunded';
-type Locale = 'zh-CN' | 'en';
-
-type Subscription = {
-  id: string; name: string; plan: string; amount: number; currency: string; cadence: string;
-  nextDate: string; category: string; status: Status; color: string; iconUrl?: string; reminderOffsets?: number[]; cadenceInterval?: number; anchorDay?: number;
-};
-
-type Bill = { id: string; subscription: string; date: string; amount: number; currency: string; status: BillStatus };
-type Notice = { id: string; title: string; body: string; date: string; read: boolean; kind: 'renewal' | 'bill' | 'system' };
-type NotificationSettings = {
-  telegram_enabled: boolean; telegram_bot_token_configured: boolean; telegram_chat_id: string;
-};
-
-const seedSubscriptions: Subscription[] = [
-  { id: 'sub-figma', name: 'Figma', plan: 'Professional', amount: 15, currency: 'USD', cadence: 'monthly', nextDate: '2026-09-03', category: '工作效率', status: 'active', color: '#242424' },
-  { id: 'sub-icloud', name: 'iCloud+', plan: '2 TB', amount: 68, currency: 'CNY', cadence: 'monthly', nextDate: '2026-09-06', category: '云服务', status: 'active', color: '#2688e6' },
-  { id: 'sub-netflix', name: 'Netflix', plan: '标准套餐', amount: 73, currency: 'HKD', cadence: 'monthly', nextDate: '2026-09-12', category: '影音娱乐', status: 'active', color: '#e5232b' },
-  { id: 'sub-notion', name: 'Notion', plan: 'Plus', amount: 10, currency: 'USD', cadence: 'monthly', nextDate: '2026-09-18', category: '工作效率', status: 'active', color: '#353535' },
-  { id: 'sub-applemusic', name: 'Apple Music', plan: '个人', amount: 11, currency: 'CNY', cadence: 'monthly', nextDate: '2026-09-22', category: '影音娱乐', status: 'active', color: '#ef4962' },
-  { id: 'sub-dropbox', name: 'Dropbox', plan: 'Plus', amount: 119.88, currency: 'USD', cadence: 'yearly', nextDate: '2027-01-14', category: '云服务', status: 'paused', color: '#1877f2' },
-];
-
-const seedBills: Bill[] = [
-  { id: 'bill-1', subscription: 'iCloud+', date: '2026-08-06', amount: 68, currency: 'CNY', status: 'paid' },
-  { id: 'bill-2', subscription: 'Figma', date: '2026-08-03', amount: 15, currency: 'USD', status: 'paid' },
-  { id: 'bill-3', subscription: 'Netflix', date: '2026-08-12', amount: 73, currency: 'HKD', status: 'paid' },
-  { id: 'bill-4', subscription: 'Notion', date: '2026-09-18', amount: 10, currency: 'USD', status: 'estimated' },
-  { id: 'bill-5', subscription: 'Apple Music', date: '2026-09-22', amount: 11, currency: 'CNY', status: 'estimated' },
-];
-
-const seedNotices: Notice[] = [
-  { id: 'n-1', title: 'Figma 将在 2 天后续费', body: '预计扣款 US$15.00，到期提醒已安排。', date: '今天 09:00', read: false, kind: 'renewal' },
-  { id: 'n-2', title: 'iCloud+ 账单已确认', body: '8 月账单 CN¥68.00 已计入支出统计。', date: '8月6日', read: false, kind: 'bill' },
-  { id: 'n-3', title: '每日汇率已更新', body: '当前汇率数据日期为 2026 年 8 月 31 日。', date: '昨天', read: false, kind: 'system' },
-];
-
-const rates: Record<string, number> = { CNY: 1, USD: 7.12, HKD: 0.91, EUR: 8.31, JPY: 0.048, GBP: 9.55 };
-const currencySymbols: Record<string, string> = { CNY: '¥', USD: 'US$', HKD: 'HK$', EUR: '€', JPY: 'JP¥', GBP: '£' };
-const colors = ['#1f6b50', '#375aa7', '#b34d45', '#75603c', '#5a4f94', '#277a7a'];
 function AppImage({ src, alt, width, height, priority = false }: { src: string; alt: string; width: number; height: number; priority?: boolean }) {
   // This shared component must work in both the Next.js and standalone Vite builds.
   // eslint-disable-next-line @next/next/no-img-element
@@ -60,65 +24,6 @@ function createLocalId() {
   // getRandomValues also works when a self-hosted instance is accessed over HTTP.
   return Array.from(crypto.getRandomValues(new Uint8Array(16)), (byte) => byte.toString(16).padStart(2, '0')).join('');
 }
-const configuredApiUrl = import.meta.env.VITE_API_URL?.replace(/\/$/, '');
-const apiUrl = configuredApiUrl
-  ? `${configuredApiUrl.replace(/\/api$/, '')}/api`
-  : undefined;
-
-async function apiRequest<T = Record<string, unknown>>(path: string, init: RequestInit = {}, token?: string | null): Promise<T> {
-  if (!apiUrl) throw new Error('API is not configured');
-  const headers = new Headers(init.headers);
-  headers.set('content-type', 'application/json');
-  if (token) headers.set('authorization', `Bearer ${token}`);
-  const response = await fetch(`${apiUrl}${path}`, { ...init, headers });
-  if (!response.ok) {
-    const payload = await response.json().catch(() => null) as {error?:{message?:string}} | null;
-    throw Object.assign(new Error(payload?.error?.message ?? '请求失败'), {status:response.status});
-  }
-  return (response.status === 204 ? null : await response.json()) as T;
-}
-
-function remoteSubscription(row: Record<string, unknown>): Subscription {
-  return {
-    id: String(row.id), name: String(row.name), plan: String(row.plan_name ?? '标准方案'),
-    amount: Number(row.amount), currency: String(row.currency), cadence: String(row.cadence_unit), cadenceInterval: Number(row.cadence_interval), anchorDay: Number(row.anchor_day),
-    nextDate: String(row.next_billing_date), category: String(row.category), status: String(row.status) as Status,
-    color: colors[String(row.name).length % colors.length], iconUrl: row.icon_url ? String(row.icon_url) : undefined,
-    reminderOffsets: Array.isArray(row.reminder_offsets) ? row.reminder_offsets.map(Number) : undefined,
-  };
-}
-
-const copy = {
-  'zh-CN': {
-    nav: ['工作台', '我的订阅', '账单记录', '通知中心', '设置'], greeting: '让每一次续费，都心中有数', add: '添加订阅',
-    expected: '本月预计', yearly: '年度预计', active: '活跃订阅', trend: '支出趋势', months: '过去 6 个月', upcoming: '即将续费', next14: '未来 14 天', all: '查看全部',
-    subscriptions: '我的订阅', subDesc: '集中查看价格、周期和下一次续费日期', bills: '账单记录', billsDesc: '核对预计扣款和真实支出', notifications: '通知中心', noticesDesc: '续费、账单与系统消息',
-    settings: '偏好设置', settingsDesc: '管理货币、语言和提醒规则', search: '搜索订阅', markAll: '全部已读',
-  },
-  en: {
-    nav: ['Dashboard', 'Subscriptions', 'Bills', 'Notifications', 'Settings'], greeting: 'Every renewal, accounted for', add: 'Add subscription',
-    expected: 'Expected this month', yearly: 'Yearly forecast', active: 'Active subscriptions', trend: 'Spending trend', months: 'Past 6 months', upcoming: 'Upcoming renewals', next14: 'Next 14 days', all: 'View all',
-    subscriptions: 'Subscriptions', subDesc: 'Review pricing, cadence, and upcoming renewals', bills: 'Bills', billsDesc: 'Reconcile forecasts with actual charges', notifications: 'Notifications', noticesDesc: 'Renewals, bills, and system updates',
-    settings: 'Preferences', settingsDesc: 'Manage currency, language, and reminder rules', search: 'Search subscriptions', markAll: 'Mark all read',
-  },
-};
-
-function useStoredState<T>(key: string, initial: T) {
-  const [value, setValue] = useState<T>(initial);
-  const [ready, setReady] = useState(false);
-  const hydrated = useRef(false);
-  useEffect(() => {
-    const saved = localStorage.getItem(key);
-    queueMicrotask(() => {
-      if (saved) { try { setValue(JSON.parse(saved)); } catch {} }
-      hydrated.current = true;
-      setReady(true);
-    });
-  }, [key]);
-  useEffect(() => { if (hydrated.current) localStorage.setItem(key, JSON.stringify(value)); }, [key, value]);
-  return [value, setValue, ready] as const;
-}
-
 function money(amount: number, currency: string) {
   return `${currencySymbols[currency] ?? `${currency} `}${amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }

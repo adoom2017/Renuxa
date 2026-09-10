@@ -21,7 +21,8 @@ done
 
 if (( WECHAT )); then
   export WECHAT_ENABLED=true
-  COMPOSE+=(--profile wechat)
+else
+  export WECHAT_ENABLED=false
 fi
 
 cleanup() { "${COMPOSE[@]}" down --remove-orphans >/dev/null 2>&1 || true; }
@@ -52,7 +53,9 @@ if (( WECHAT )); then
 fi
 
 if (( RUN_TESTS )); then
-  cargo test --workspace
+  cargo test --locked -p renuxa-server -p im-channel-gateway
+  npm test
+  npm run typecheck
   npm run lint
 fi
 

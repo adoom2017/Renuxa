@@ -1,8 +1,8 @@
 # API 接入指南
 
 API 默认监听容器内 `8080`。本地构建 Compose 默认发布到
-`http://127.0.0.1:8081`，Web 部署通过同源 `/api` 访问。除注册和登录外，业务接口
-均使用 `Authorization: Bearer <JWT>`。
+`http://127.0.0.1:8081`，Web 部署通过同源 `/api` 访问。账户业务接口使用 `Authorization: Bearer <JWT>`。
+注册、登录、健康检查和图标搜索/代理无需 JWT；微信消息投递使用网关 token。
 
 ## HTTP 路由
 

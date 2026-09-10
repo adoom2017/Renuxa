@@ -1,7 +1,7 @@
 # 微信订阅录入
 
 网关源码位于 `im-channel-gateway/`，来源提交和许可见该目录的
-`UPSTREAM.md`、`LICENSE`。不需要原 rust-agent 目录。
+`UPSTREAM.md`、`LICENSE`。
 API、Worker、Gateway 使用同一版本服务端镜像，网关独立运行。
 
 ## 配置与启动
@@ -40,18 +40,9 @@ Docker 默认使用容器内 Tesseract 识别中英文图片文字，再交给�
 默认配置在镜像 `/etc/renuxa/wechat.toml`，管理接口只监听容器
 `0.0.0.0:18765`，仅容器网络可访问，未发布宿主机端口；所有管理请求使用 `WECHAT_GATEWAY_TOKEN` 验证。API 通过 `WECHAT_GATEWAY_URL` 访问网关，Compose 默认 `http://gateway:18765`；只启用微信和 http_sse。
 
-首次部署建议使用本仓库构建（现有旧发布镜像不包含此功能）：
-
-```sh
-docker compose --env-file .env -f docker/compose.build.yml up --build -d
-docker compose --env-file .env -f docker/compose.build.yml run --rm gateway im-channel-gateway --config /etc/renuxa/wechat.toml login wechat
-docker compose --env-file .env -f docker/compose.build.yml up -d gateway
-```
-
-扫码登录命令会在终端显示二维码，并写入独立 `wechat-data` 卷。
-登录 CLI 完成后再启动 gateway，避免并发修改账号注册文件。
-镜像发布后，改用 `-f docker/compose.yml` 拉取预构建镜像；默认标签为
-`latest`，也可通过 `RENUXA_VERSION` 指定版本。现有 amd64/arm64 发布流程无需变更。
+部署可使用预构建镜像或本地构建配置，命令见 [部署与运维](deployment.md)。
+启动后优先使用 Web 扫码绑定。终端 `login wechat` 仅用于管理登录，不会绑定
+Renuxa 用户；执行前必须停止 gateway，操作顺序见下方“重启、重新登录与备份”。
 
 如需生成通用配置，可运行：
 
@@ -77,7 +68,7 @@ cargo run -p im-channel-gateway -- --config /tmp/gateway.example.toml init
 发现相同有效订阅时须回复“仍然添加”。草稿二十四小时后过期。
 解绑立即删除草稿；过期草稿由 Worker 定期清理。
 用户时区取自服务端 `users.timezone`（默认 Asia/Shanghai）；
-页面生成绑定码时会将通用设置的时区同步到服务端，供相对日期解析使用。
+页面创建二维码或调用旧版绑定码接口时会将时区同步到服务端，供相对日期解析使用。
 以后更改本设备显示时区不会自动改变已经绑定的录入时区。
 
 仅支持私聊文字及 JPEG、PNG、WebP；每条最多三张、单图八 MB、
@@ -112,14 +103,14 @@ docker compose --env-file .env -f docker/compose.yml up -d gateway
 
 ```sh
 cargo test --locked -p renuxa-server -p im-channel-gateway
-npx tsc --noEmit
-node --test app/billing.test.ts
+npm run typecheck
+npm test
 npm run lint
 npm run build
 docker compose --env-file .env -f docker/compose.yml config --quiet
 docker compose --env-file .env -f docker/compose.build.yml config --quiet
 # 使用可创建临时测试数据库的本地 PostgreSQL：
-DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/postgres cargo test -p renuxa-server --test wechat_flow -- --ignored
+DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/postgres cargo test --locked -p renuxa-server --test wechat_flow --test wechat_qr -- --ignored
 # 构建并运行隔离容器验收（使用本机 55440 端口，自动清理测试容器和卷）：
 docker build -f docker/Dockerfile.server -t renuxa-server:wechat-verification .
 node server/tests/container-smoke.mjs
@@ -129,9 +120,5 @@ node server/tests/container-smoke.mjs
 歧义币种、相对日期、月末日期、连续截图和确认，以及网关/API 重启。
 自动化 mock 模型测试不能证明模型提供商的实际识图质量。
 
-2026-09-08 本地验证：PostgreSQL 17 集成测试通过，覆盖并发确认、重复请求、
-连续图片、图片后修改、非法图片及换绑后的旧消息隔离；Linux ARM64 镜像构建
-成功。隔离容器验收通过 API 重启后的草稿保留、确认响应丢弃后幂等重试、
-网关账号/token/cursor 测试数据保留、单实例锁、关闭网关后订阅 API 可用及
-同镜像 Worker 启动。账号持久化采用禁用的模拟账号，未进行真实微信扫码、
-真实模型识图或本地 AMD64 镜像构建；发布流程仍配置 amd64/arm64 双架构。
+数据库集成测试默认跳过，需要显式提供可创建临时数据库的 PostgreSQL 后运行。
+容器验收覆盖重启恢复和幂等性；真实微信账号与模型的验证须单独执行。

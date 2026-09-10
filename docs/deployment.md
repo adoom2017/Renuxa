@@ -1,5 +1,18 @@
 # 部署与运维
 
+## 环境准备
+
+需要 Docker Engine 与 Compose Plugin。macOS 可安装 Docker CLI 和 Colima：
+
+```bash
+brew install docker docker-buildx docker-compose colima
+colima start --cpu 4 --memory 6
+```
+
+Homebrew 插件未被发现时，将 `/opt/homebrew/lib/docker/cli-plugins` 加入
+`~/.docker/config.json` 的 `cliPluginsExtraDirs`。Linux 安装方式见
+[Docker 官方文档](https://docs.docker.com/engine/install/)。
+
 ## 配置
 
 从仓库根目录创建配置，并至少替换 `JWT_SECRET`：
@@ -24,7 +37,7 @@ cp .env.example .env
 npm run debug
 ```
 
-只启动服务使用 `npm run debug -- --no-tests`；启用微信网关使用
+调试脚本默认关闭微信 API 且不启动网关。只启动服务使用 `npm run debug -- --no-tests`；启用微信网关使用
 `npm run debug -- --wechat --no-tests`。按 `Ctrl-C` 停止容器并保留数据卷。
 固定端口被占用时脚本会失败，不会自动改用其他端口。
 
@@ -50,6 +63,12 @@ docker compose --env-file .env -f docker/compose.build.yml up --build -d --wait
 该配置发布 Web 和 API 端口。`--wait` 会等到 Web、API 和 PostgreSQL 健康后再返回；
 不使用 `--wait` 时，命令返回后的前几十秒内服务仍可能处于启动阶段。
 
+## 通知配置
+
+用户登录后在“设置 → 通知”配置 Telegram 的 Bot Token 和 Chat ID。
+应用内通知始终启用；Telegram 凭据按账户独立保存，读取接口不会返回 Bot Token，
+保存时留空会保留已有密钥。Worker 必须运行，才会生成续费提醒和发送通知。
+
 ## 日常操作
 
 ```bash
@@ -70,14 +89,19 @@ docker compose --env-file .env -f docker/compose.yml down
 `.github/workflows/docker-images.yml` 从 `docker/Dockerfile.web` 和
 `docker/Dockerfile.server` 构建 `linux/amd64`、`linux/arm64` 镜像。推送形如
 `v0.1.2` 的标签，或在 GitHub Actions 手动输入版本即可发布。
+仓库 Actions Secrets 需配置 `DOCKERHUB_USERNAME` 和具备写入权限的
+`DOCKERHUB_TOKEN`。镜像名为 `adoom2018/renuxa-web` 和
+`adoom2018/renuxa-server`，标签发布会同时更新版本标签与 `latest`。
 
 ## 验证
 
 ```bash
 cargo test --locked -p renuxa-server -p im-channel-gateway
-npx tsc --noEmit
+npm test
+npm run typecheck
 npm run lint
 npm run build
+npm run build:desktop-web
 docker compose -f docker/compose.yml config --quiet
 docker compose -f docker/compose.build.yml config --quiet
 ```

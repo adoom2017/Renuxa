@@ -15,6 +15,16 @@
 Web 通过 Nginx 将同源 `/api` 请求转发到 API。Gateway 通过受 token 保护的
 HTTP SSE 接口向 API 投递微信消息；API 通过 Gateway 管理接口创建和轮询登录二维码。
 
+## 代码组织
+
+- `app/renuxa-app.tsx` 组合产品界面；`models.ts` 定义共用类型，`api.ts` 负责
+  请求和服务端数据映射，`billing.ts` 负责计费日期，`use-stored-state.ts` 管理本地持久化。
+- `app/demo-data.ts` 隔离离线示例数据；`copy.ts` 和 `constants.ts` 保存文案与显示常量。
+- `server/src/routes.rs` 组装业务路由，`routes/icons.rs` 封装图标搜索和代理；
+  `subscriptions.rs` 共享订阅校验与入库逻辑，`wechat.rs` 实现微信状态机。
+- 网关保留上游可配置的渠道与 agent 适配器；Renuxa 部署只启用微信和 HTTP SSE。
+- `src-tauri/gen/schemas/` 是原生构建生成的 schema，不纳入版本控制。
+
 ## 微信数据流
 
 1. 已认证用户请求 `/api/integrations/wechat/qrcode`。
@@ -39,6 +49,7 @@ Worker 每分钟扫描 `subscriptions` 和 `subscription_reminders`。达到提�
 
 - 核心：`users`、`subscriptions`、`subscription_reminders`、`bills`
 - 通知：`notifications`、`notification_deliveries`、`notification_settings`
+- 汇率：`exchange_rates`
 - 微信：`wechat_bindings`、`wechat_binding_codes`、`wechat_qr_sessions`、
   `wechat_drafts`、`wechat_messages`、`wechat_rate_limits`
 
