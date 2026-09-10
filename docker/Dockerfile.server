@@ -14,8 +14,8 @@ COPY src-tauri/src ./src-tauri/src
 COPY server ./server
 COPY im-channel-gateway ./im-channel-gateway
 
-RUN --mount=type=cache,id=renuxa-cargo-registry,target=/usr/local/cargo/registry \
-    --mount=type=cache,id=renuxa-cargo-git,target=/usr/local/cargo/git \
+RUN --mount=type=cache,id=renuxa-cargo-registry-${TARGETARCH},target=/usr/local/cargo/registry \
+    --mount=type=cache,id=renuxa-cargo-git-${TARGETARCH},target=/usr/local/cargo/git \
     --mount=type=cache,id=renuxa-target-${TARGETARCH},target=/app/target \
     touch server/src/lib.rs server/src/main.rs server/src/bin/worker.rs && \
     cargo build --locked --release -p renuxa-server -p im-channel-gateway --bins && \
