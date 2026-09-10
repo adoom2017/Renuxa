@@ -23,9 +23,18 @@ export function remoteSubscription(row: Record<string, unknown>): Subscription {
   return {
     id: String(row.id), name: String(row.name), plan: String(row.plan_name ?? '标准方案'),
     amount: Number(row.amount), currency: String(row.currency), cadence: String(row.cadence_unit), cadenceInterval: Number(row.cadence_interval), anchorDay: Number(row.anchor_day),
-    nextDate: String(row.next_billing_date), category: String(row.category), status: String(row.status) as Status,
+    startDate: row.start_date ? String(row.start_date) : undefined, nextDate: String(row.next_billing_date), category: String(row.category), status: String(row.status) as Status,
     color: colors[String(row.name).length % colors.length], iconUrl: row.icon_url ? String(row.icon_url) : undefined,
     reminderOffsets: Array.isArray(row.reminder_offsets) ? row.reminder_offsets.map(Number) : undefined,
   };
 }
 
+
+export async function allBills(token: string) {
+  const bills: Record<string, unknown>[] = [];
+  for (;;) {
+    const page = await apiRequest<Record<string, unknown>[]>(`/bills?offset=${bills.length}`, {}, token);
+    bills.push(...page);
+    if (page.length < 200) return bills;
+  }
+}

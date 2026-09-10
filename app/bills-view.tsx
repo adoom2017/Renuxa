@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { CalendarDays, Check, CircleDollarSign, ReceiptText, RefreshCw, WalletCards } from 'lucide-react';
 import { apiRequest, apiUrl } from './api';
-import { billSummary, convertBillAmount, upcomingBills } from './billing';
+import { billSummary, convertBillAmount, upcomingBills, historicalBillAmount } from './billing';
 import { rates as demoRates } from './constants';
 import { money } from './format';
 import type { copy } from './copy';
@@ -38,19 +38,23 @@ export function BillsView({ bills, subscriptions, currency, token, t, onUpdate, 
         if (cancelled) return;
         setExchangeRates(Object.fromEntries([[result.base, 1], ...result.rates.map((rate) => [rate.currency, Number(rate.rate)])]));
         setRateDate(result.rates[0]?.date ?? '');
-      }).catch(() => { if (!cancelled) setExchangeRates({}); });
+      }).catch(() => { /* Keep the last successfully loaded rates during a transient failure. */ });
     return () => { cancelled = true; };
   }, [token, rateRefresh]);
 
   const shown = bills.filter((bill) => filter === 'all' || bill.status === filter);
   const { paidThisYear, pending } = billSummary(bills);
+  const originalPaid = Object.entries(paidThisYear.reduce<Record<string,number>>((totals,bill)=>{
+    totals[bill.currency]=(totals[bill.currency]??0)+bill.amount;
+    return totals;
+  },{})).map(([code,amount])=>money(amount,code)).join(' + ');
   const forecasts = upcomingBills(subscriptions, bills);
-  const converted = (bill: { amount: number; currency: string }) => convertBillAmount(bill.amount, bill.currency, currency, exchangeRates);
+  const converted = (bill: { amount: number; currency: string }) => apiUrl && 'status' in bill ? historicalBillAmount(bill as Bill, currency) : convertBillAmount(bill.amount, bill.currency, currency, exchangeRates);
   const paidAmounts = paidThisYear.map(converted);
   const total = paidAmounts.some((value) => value === null) ? null : paidAmounts.reduce<number>((sum, value) => sum + (value ?? 0), 0);
   const displayConverted = (bill: { amount: number; currency: string }) => {
     const value = converted(bill);
-    return value === null ? '汇率暂不可用' : money(value, currency);
+    return value === null ? '汇率待同步' : money(value, currency);
   };
   const confirmPayment = async (id: string) => {
     setPendingId(id);
@@ -63,17 +67,19 @@ export function BillsView({ bills, subscriptions, currency, token, t, onUpdate, 
   return <>
     <header className="topbar"><div><p>BILLING</p><h1>{t.bills}</h1><span className="page-description">{t.billsDesc}</span></div><button className="secondary" onClick={()=>{onRefresh();setRateRefresh(value=>value+1);}}><RefreshCw size={16}/>刷新账单</button></header>
     {(refreshError || error) && <p role="alert">{error || refreshError}</p>}
+    {subscriptions.some(sub=>!sub.startDate)&&<p role="status">部分订阅尚未设置开始日期。请在“我的订阅”编辑并补填，以生成历史已支付账单。</p>}
     <div className="bill-summary">
-      <div><CircleDollarSign/><span>今年已支付<small>按账单日 · {currency}</small></span><strong>{total === null ? '汇率暂不可用' : money(total, currency)}</strong></div>
+      <div><CircleDollarSign/><span>今年已支付<small>按账单日 · {currency}</small></span><strong>{total === null ? '汇率待同步' : money(total, currency)}</strong></div>
       <div><CalendarDays/><span>待确认账单<small>已生成，含逾期</small></span><strong>{pending}</strong></div>
-      <div><WalletCards/><span>记录总数<small>已加载账单</small></span><strong>{bills.length}</strong></div>
+      <div><WalletCards/><span>记录总数<small>全部账单</small></span><strong>{bills.length}</strong></div>
     </div>
-    <p className="page-description">{apiUrl ? (rateDate ? `折算使用 ${rateDate} 参考汇率，实际扣款以支付渠道为准。` : '暂无参考汇率；原币金额正常显示。') : '离线演示数据，折算使用示例汇率。'}{bills.length >= 200 && ' 当前仅展示最近 200 条账单，统计限于这些记录。'}</p>
+    <p className="page-description">{apiUrl ? (rateDate ? `扣款预估使用 ${rateDate} 参考汇率；已入账记录使用账单日对应的历史汇率。` : '暂无参考汇率；原币金额正常显示。') : '离线演示数据，折算使用示例汇率。'}</p>
+    {total === null && <p>今年已支付（原币合计）：{originalPaid}</p>}
     <div className="segmented">{(['all', 'estimated', 'paid', 'skipped', 'refunded'] as const).map((value) => <button className={filter === value ? 'active' : ''} key={value} onClick={() => setFilter(value)}>{value === 'all' ? '全部' : labels[value]}</button>)}</div>
     <section className="data-panel bills-table" aria-label="已生成账单">
       <div className="table-head"><span>订阅</span><span>账单日</span><span>原币金额</span><span>折合 {currency}</span><span>状态</span><span/></div>
       {shown.map((bill) => <article className="table-row" key={bill.id}>
-        <strong>{bill.subscription}</strong><span>{bill.date}</span><strong>{money(bill.amount, bill.currency)}</strong><span>{displayConverted(bill)}</span><span className={`status ${bill.status}`}>{labels[bill.status]}</span>
+        <strong>{bill.subscription}</strong><span>{bill.date}</span><strong>{money(bill.amount, bill.currency)}</strong><span>{displayConverted(bill)}{bill.exchangeRateDate&&<small>汇率日 {bill.exchangeRateDate}</small>}</span><span className={`status ${bill.status}`}>{labels[bill.status]}</span>
         <div className="bill-action">{bill.status === 'estimated' && <button disabled={pendingId !== null} onClick={() => void confirmPayment(bill.id)}><Check size={14}/>{pendingId === bill.id ? '保存中…' : '确认支付'}</button>}</div>
       </article>)}
     </section>

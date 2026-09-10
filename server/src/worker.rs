@@ -45,7 +45,7 @@ pub async fn run_cycle(state: &AppState) -> Result<(), sqlx::Error> {
             }
         }
     }
-    let rows = sqlx::query("SELECT id,user_id,name,amount,currency,cadence_unit,cadence_interval,next_billing_date,anchor_day FROM subscriptions WHERE status='active' AND next_billing_date <= current_date ORDER BY next_billing_date FOR UPDATE SKIP LOCKED LIMIT 100")
+    let rows = sqlx::query("SELECT id,user_id,name,amount,currency,cadence_unit,cadence_interval,next_billing_date,anchor_day,start_date FROM subscriptions WHERE status='active' AND next_billing_date <= (SELECT (now() AT TIME ZONE timezone)::date FROM users WHERE id=subscriptions.user_id) ORDER BY next_billing_date FOR UPDATE SKIP LOCKED LIMIT 100")
         .fetch_all(&mut *tx).await?;
     for row in rows {
         let id: Uuid = row.get("id");
@@ -55,10 +55,11 @@ pub async fn run_cycle(state: &AppState) -> Result<(), sqlx::Error> {
         let unit: String = row.get("cadence_unit");
         let interval: i32 = row.get("cadence_interval");
         let anchor: i16 = row.get("anchor_day");
-        sqlx::query("INSERT INTO bills (user_id,subscription_id,amount,currency,due_date,status,idempotency_key) VALUES ($1,$2,$3,$4,$5,'estimated',$6) ON CONFLICT (idempotency_key) DO NOTHING")
-            .bind(user_id).bind(id).bind(row.get::<rust_decimal::Decimal,_>("amount")).bind(row.get::<String,_>("currency")).bind(due).bind(format!("renewal:{id}:{due}")).execute(&mut *tx).await?;
+        let scheduled = row.get::<Option<NaiveDate>, _>("start_date").is_some();
+        sqlx::query("INSERT INTO bills (user_id,subscription_id,amount,currency,due_date,status,idempotency_key,source) VALUES ($1,$2,$3,$4,$5,$7,$6,$8) ON CONFLICT (idempotency_key) DO NOTHING")
+            .bind(user_id).bind(id).bind(row.get::<rust_decimal::Decimal,_>("amount")).bind(row.get::<String,_>("currency")).bind(due).bind(format!("renewal:{id}:{due}")).bind(if scheduled { "paid" } else { "estimated" }).bind(if scheduled { "schedule" } else { "renewal" }).execute(&mut *tx).await?;
         sqlx::query("INSERT INTO notifications (user_id,subscription_id,title,body,kind,scheduled_for,idempotency_key) VALUES ($1,$2,$3,$4,'renewal',now(),$5) ON CONFLICT (idempotency_key) DO NOTHING")
-            .bind(user_id).bind(id).bind(format!("{name} 今日续费")).bind("已生成预计账单，请确认实际扣款。".to_string()).bind(format!("renewal-notice:{id}:{due}")).execute(&mut *tx).await?;
+            .bind(user_id).bind(id).bind(format!("{name} 今日续费")).bind(if scheduled { "已按订阅周期记账。" } else { "已生成预计账单，请确认实际扣款。" }).bind(format!("renewal-notice:{id}:{due}")).execute(&mut *tx).await?;
         if unit == "once" {
             sqlx::query("UPDATE subscriptions SET status='cancelled',updated_at=now() WHERE id=$1")
                 .bind(id)
@@ -78,50 +79,26 @@ pub async fn run_cycle(state: &AppState) -> Result<(), sqlx::Error> {
     tx.commit().await?;
     deliver_telegram(state).await;
     sync_rates(state).await;
+    match tokio::time::timeout(
+        std::time::Duration::from_secs(30),
+        crate::exchange_rates::backfill(state),
+    )
+    .await
+    {
+        Ok(Ok(count)) if count > 0 => {
+            tracing::info!(bills = count, "historical bill exchange rates updated")
+        }
+        Ok(Ok(_)) => {}
+        Ok(Err(error)) => tracing::warn!(error=%error, "historical bill conversion failed"),
+        Err(_) => tracing::warn!("historical bill conversion timed out; continuing next cycle"),
+    }
     Ok(())
 }
 
 async fn sync_rates(state: &AppState) {
-    let fresh: bool = sqlx::query_scalar(
-        "SELECT coalesce(max(rate_date)>=current_date,false) FROM exchange_rates",
-    )
-    .fetch_one(&state.db)
-    .await
-    .unwrap_or(false);
-    if fresh {
-        return;
+    if let Err(error) = crate::exchange_rates::sync(state).await {
+        tracing::warn!(provider = "frankfurter", error = %error, "exchange rate sync failed; keeping cached rates");
     }
-    let Ok(response) = state
-        .http
-        .get("https://api.frankfurter.app/latest?from=EUR")
-        .send()
-        .await
-    else {
-        return;
-    };
-    let Ok(payload) = response.json::<serde_json::Value>().await else {
-        return;
-    };
-    let Some(date) = payload["date"]
-        .as_str()
-        .and_then(|value| NaiveDate::parse_from_str(value, "%Y-%m-%d").ok())
-    else {
-        return;
-    };
-    let Some(rates) = payload["rates"].as_object() else {
-        return;
-    };
-    for (currency, value) in rates {
-        let Some(rate) = value
-            .as_f64()
-            .and_then(rust_decimal::Decimal::from_f64_retain)
-        else {
-            continue;
-        };
-        let _ = sqlx::query("INSERT INTO exchange_rates(rate_date,base_currency,quote_currency,rate,provider) VALUES($1,'EUR',$2,$3,'frankfurter') ON CONFLICT(rate_date,base_currency,quote_currency) DO UPDATE SET rate=excluded.rate,provider=excluded.provider")
-            .bind(date).bind(currency).bind(rate).execute(&state.db).await;
-    }
-    let _ = sqlx::query("INSERT INTO exchange_rates(rate_date,base_currency,quote_currency,rate,provider) VALUES($1,'EUR','EUR',1,'frankfurter') ON CONFLICT DO NOTHING").bind(date).execute(&state.db).await;
 }
 
 async fn deliver_telegram(state: &AppState) {

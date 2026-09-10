@@ -69,6 +69,30 @@ docker compose --env-file .env -f docker/compose.build.yml up --build -d --wait
 应用内通知始终启用；Telegram 凭据按账户独立保存，读取接口不会返回 Bot Token，
 保存时留空会保留已有密钥。Worker 必须运行，才会生成续费提醒和发送通知。
 
+## 汇率同步排障
+
+Worker 从 `https://api.frankfurter.dev/v1/latest?from=EUR` 获取参考汇率，15 秒超时。
+旧 `.app` 地址会返回 301；应用的共享 HTTP 客户端不跟随重定向。
+同步失败时 Worker 记录 `exchange rate sync failed` 并保留上次成功的数据。
+供应商按交易日发布，页面显示上一个交易日的日期是正常情况。
+
+在本地容器中验证上游连接：
+
+```bash
+docker compose -f docker/compose.build.yml exec worker curl --fail --silent --show-error --max-time 15 'https://api.frankfurter.dev/v1/latest?from=EUR'
+```
+
+上游恢复后 Worker 会继续同步，并自动补齐历史账单的折算金额。补齐按账单日查询
+历史快照，每轮最多 5 个日期；失败或超时留待后续重试。日志
+`historical bill exchange rates updated` 表示已有账单完成补齐。账单页点击
+“刷新账单”可读取更新后的结果。尚未填写订阅开始日期的项目不会因此自动生成历史账单。
+
+## 订阅开始日期升级
+
+升级 API 会自动应用 `0006_subscription_start_date.sql`，新增订阅开始日期和
+账单来源列。需一并更新 API、Worker 和 Web。旧订阅不会自动猜测开始日期，
+请在“我的订阅”编辑补填；保存后会按当前金额和周期补记历史已支付账单。
+
 ## 日常操作
 
 ```bash

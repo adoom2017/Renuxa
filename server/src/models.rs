@@ -14,6 +14,7 @@ pub struct Subscription {
     pub cadence_unit: String,
     pub cadence_interval: i32,
     pub next_billing_date: NaiveDate,
+    pub start_date: Option<NaiveDate>,
     pub anchor_day: i16,
     pub status: String,
     pub category: String,
@@ -34,7 +35,8 @@ pub struct CreateSubscription {
     pub currency: String,
     pub cadence_unit: String,
     pub cadence_interval: Option<i32>,
-    pub next_billing_date: NaiveDate,
+    pub next_billing_date: Option<NaiveDate>,
+    pub start_date: Option<NaiveDate>,
     pub category: Option<String>,
     pub payment_method: Option<String>,
     pub notes: Option<String>,
@@ -53,6 +55,8 @@ pub struct Bill {
     pub status: String,
     pub base_amount: Option<Decimal>,
     pub base_currency: Option<String>,
+    pub exchange_rate_date: Option<NaiveDate>,
+    pub reference_rates: sqlx::types::Json<serde_json::Value>,
     pub created_at: DateTime<Utc>,
 }
 

@@ -64,3 +64,36 @@ test('currency conversion uses cross rates and never presents missing rates as z
   assert.equal(convertBillAmount(10, 'USD', 'CNY', {}), null);
   assert.equal(convertBillAmount(10, 'USD', 'CNY', {USD:0,CNY:7}), null);
 });
+
+// @ts-expect-error Node's native TypeScript loader needs the explicit extension.
+import { subscriptionPlan, localSubscriptionBills } from './billing.ts';
+
+test('start date produces paid cycles and derives the next anchored renewal',()=>{
+  const plan=subscriptionPlan({startDate:'2026-01-31',nextDate:'',cadence:'month'},date('2026-03-31'));
+  assert.deepEqual(plan,{paidDates:['2026-01-31','2026-02-28','2026-03-31'],nextDate:'2026-04-30'});
+  assert.deepEqual(subscriptionPlan({startDate:'2026-11-12',nextDate:'',cadence:'year'},date('2026-09-10')),{paidDates:[],nextDate:'2026-11-12'});
+  assert.deepEqual(subscriptionPlan({startDate:'2026-01-01',nextDate:'',cadence:'once'},date('2026-09-10')),{paidDates:['2026-01-01'],nextDate:'2026-01-01'});
+});
+
+test('a known start date prevents dashboard charts from inventing earlier charges',()=>{
+  assert.equal(billingDates({startDate:'2026-09-23',nextDate:'2026-10-23',cadence:'month'},date('2026-01-01'),date('2026-10-01')).length,1);
+});
+
+test('offline historical bills are idempotent and preserve confirmed statuses',()=>{
+  const sub=subscription({startDate:'2020-01-01',cadence:'once'});
+  const initial=localSubscriptionBills(sub,[]);
+  assert.equal(initial.length,1);
+  assert.equal(initial[0].status,'paid');
+  assert.deepEqual(localSubscriptionBills(sub,[{...initial[0],status:'refunded'}]),[{...initial[0],status:'refunded'}]);
+});
+
+// @ts-expect-error Node's native TypeScript loader needs the explicit extension.
+import { historicalBillAmount } from './billing.ts';
+
+test('historical bills retain booked conversion and use dated cross rates for other currencies',()=>{
+  const paid=bill({amount:10,currency:'USD',baseAmount:70,baseCurrency:'CNY',exchangeRateDate:'2026-08-21',referenceRates:{EUR:1,USD:1.2,CNY:8.4,GBP:0.84}});
+  assert.equal(historicalBillAmount(paid,'CNY'),70);
+  assert.equal(historicalBillAmount(paid,'USD'),10);
+  assert.equal(historicalBillAmount(paid,'GBP'),7);
+  assert.equal(historicalBillAmount(bill(),'CNY'),null);
+});

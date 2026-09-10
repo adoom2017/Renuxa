@@ -12,7 +12,7 @@ use argon2::{
 };
 use axum::{
     Json, Router,
-    extract::{Path, State},
+    extract::{Path, Query, State},
     http::StatusCode,
     routing::{get, patch, post},
 };
@@ -106,7 +106,7 @@ async fn list_subscriptions(
     user: CurrentUser,
     State(state): State<AppState>,
 ) -> Result<Json<Vec<Subscription>>, ApiError> {
-    let rows = sqlx::query_as::<_, Subscription>("SELECT s.id,s.name,s.plan_name,s.amount,s.currency,s.cadence_unit,s.cadence_interval,s.next_billing_date,s.anchor_day,s.status,s.category,s.payment_method,s.notes,s.icon_url,coalesce((SELECT array_agg(r.days_before ORDER BY r.days_before DESC) FROM subscription_reminders r WHERE r.subscription_id=s.id),ARRAY[]::integer[]) reminder_offsets,s.created_at,s.updated_at FROM subscriptions s WHERE s.user_id=$1 AND s.status <> 'archived' ORDER BY s.next_billing_date")
+    let rows = sqlx::query_as::<_, Subscription>("SELECT s.id,s.name,s.plan_name,s.amount,s.currency,s.cadence_unit,s.cadence_interval,s.next_billing_date,s.start_date,s.anchor_day,s.status,s.category,s.payment_method,s.notes,s.icon_url,coalesce((SELECT array_agg(r.days_before ORDER BY r.days_before DESC) FROM subscription_reminders r WHERE r.subscription_id=s.id),ARRAY[]::integer[]) reminder_offsets,s.created_at,s.updated_at FROM subscriptions s WHERE s.user_id=$1 AND s.status <> 'archived' ORDER BY s.next_billing_date")
         .bind(user.0).fetch_all(&state.db).await?;
     Ok(Json(rows))
 }
@@ -143,7 +143,7 @@ async fn update_subscription(
     if !["active", "paused", "cancelled"].contains(&status) {
         return Err(ApiError::Validation("无效订阅状态".into()));
     }
-    let row = sqlx::query_as::<_, Subscription>("UPDATE subscriptions SET status=$3, updated_at=now() WHERE id=$1 AND user_id=$2 AND status <> 'archived' RETURNING id,name,plan_name,amount,currency,cadence_unit,cadence_interval,next_billing_date,anchor_day,status,category,payment_method,notes,icon_url,created_at,updated_at")
+    let row = sqlx::query_as::<_, Subscription>("UPDATE subscriptions SET status=$3, updated_at=now() WHERE id=$1 AND user_id=$2 AND status <> 'archived' RETURNING id,name,plan_name,amount,currency,cadence_unit,cadence_interval,next_billing_date,start_date,anchor_day,status,category,payment_method,notes,icon_url,created_at,updated_at")
         .bind(id).bind(user.0).bind(status).fetch_optional(&state.db).await?.ok_or(ApiError::NotFound)?;
     Ok(Json(row))
 }
@@ -166,11 +166,18 @@ async fn archive_subscription(
     Ok(StatusCode::NO_CONTENT)
 }
 
+#[derive(serde::Deserialize)]
+struct BillQuery {
+    #[serde(default)]
+    offset: u32,
+}
+
 async fn list_bills(
     user: CurrentUser,
     State(state): State<AppState>,
+    Query(query): Query<BillQuery>,
 ) -> Result<Json<Vec<Bill>>, ApiError> {
-    let rows = sqlx::query_as::<_, Bill>("SELECT b.id,b.subscription_id,s.name subscription_name,b.amount,b.currency,b.due_date,b.status,b.base_amount,b.base_currency,b.created_at FROM bills b JOIN subscriptions s ON s.id=b.subscription_id WHERE b.user_id=$1 ORDER BY b.due_date DESC LIMIT 200").bind(user.0).fetch_all(&state.db).await?;
+    let rows = sqlx::query_as::<_, Bill>("SELECT b.id,b.subscription_id,s.name subscription_name,b.amount,b.currency,b.due_date,b.status,b.base_amount,b.base_currency,b.exchange_rate_date,coalesce((SELECT jsonb_object_agg(quote_currency,rate::text) FROM exchange_rates WHERE base_currency='EUR' AND rate_date=b.exchange_rate_date),'{}'::jsonb) reference_rates,b.created_at FROM bills b JOIN subscriptions s ON s.id=b.subscription_id WHERE b.user_id=$1 ORDER BY b.due_date DESC,b.id DESC LIMIT 200 OFFSET $2").bind(user.0).bind(i64::from(query.offset)).fetch_all(&state.db).await?;
     Ok(Json(rows))
 }
 
@@ -187,13 +194,14 @@ async fn update_bill(
     if !["estimated", "paid", "skipped", "refunded"].contains(&status) {
         return Err(ApiError::Validation("无效账单状态".into()));
     }
-    let result =
-        sqlx::query("UPDATE bills SET status=$3, updated_at=now() WHERE id=$1 AND user_id=$2")
-            .bind(id)
-            .bind(user.0)
-            .bind(status)
-            .execute(&state.db)
-            .await?;
+    let result = sqlx::query(
+        "UPDATE bills SET status=$3, source='manual', updated_at=now() WHERE id=$1 AND user_id=$2",
+    )
+    .bind(id)
+    .bind(user.0)
+    .bind(status)
+    .execute(&state.db)
+    .await?;
     if result.rows_affected() == 0 {
         return Err(ApiError::NotFound);
     }
@@ -285,7 +293,7 @@ async fn exchange_rates(
     _user: CurrentUser,
     State(state): State<AppState>,
 ) -> Result<Json<Value>, ApiError> {
-    let rows: Vec<(String, rust_decimal::Decimal, chrono::NaiveDate)> = sqlx::query_as("SELECT quote_currency,rate,rate_date FROM exchange_rates WHERE base_currency='EUR' AND rate_date=(SELECT max(rate_date) FROM exchange_rates) ORDER BY quote_currency")
+    let rows: Vec<(String, rust_decimal::Decimal, chrono::NaiveDate)> = sqlx::query_as("SELECT quote_currency,rate,rate_date FROM exchange_rates WHERE base_currency='EUR' AND rate_date=(SELECT max(rate_date) FROM exchange_rates WHERE base_currency='EUR') ORDER BY quote_currency")
         .fetch_all(&state.db).await?;
     Ok(Json(
         json!({"base":"EUR","rates":rows.into_iter().map(|(currency,rate,date)|json!({"currency":currency,"rate":rate,"date":date})).collect::<Vec<_>>()}),

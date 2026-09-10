@@ -1,5 +1,6 @@
 pub mod auth;
 pub mod error;
+pub mod exchange_rates;
 pub mod models;
 pub mod routes;
 pub mod subscriptions;
