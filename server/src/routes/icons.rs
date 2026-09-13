@@ -82,17 +82,39 @@ async fn search_icons(
     if query.q.trim().is_empty() {
         return Ok(Json(vec![]));
     }
-    let response: Value = state
-        .http
+    let (china, us) = tokio::try_join!(
+        search_store(&state.http, &query.q, "cn"),
+        search_store(&state.http, &query.q, "us"),
+    )?;
+    Ok(Json(interleave_candidates(china, us)))
+}
+
+fn interleave_candidates(china: Vec<IconCandidate>, us: Vec<IconCandidate>) -> Vec<IconCandidate> {
+    let mut china = china.into_iter();
+    let mut us = us.into_iter();
+    (0..3)
+        .flat_map(|_| [china.next(), us.next()])
+        .flatten()
+        .collect()
+}
+
+async fn search_store(
+    http: &reqwest::Client,
+    term: &str,
+    country: &str,
+) -> Result<Vec<IconCandidate>, ApiError> {
+    let response: Value = http
         .get("https://itunes.apple.com/search")
         .query(&[
-            ("term", query.q.as_str()),
+            ("term", term),
             ("entity", "software"),
-            ("limit", "8"),
-            ("country", "us"),
+            ("limit", "3"),
+            ("country", country),
         ])
         .send()
         .await
+        .map_err(|_| ApiError::Upstream)?
+        .error_for_status()
         .map_err(|_| ApiError::Upstream)?
         .json()
         .await
@@ -114,12 +136,42 @@ async fn search_icons(
             })
         })
         .collect();
-    Ok(Json(results))
+    Ok(results)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::is_trusted_icon_url;
+    use super::{interleave_candidates, is_trusted_icon_url};
+    use crate::models::IconCandidate;
+
+    #[test]
+    fn mixes_store_rankings_and_keeps_results_from_shorter_lists() {
+        let candidates = |country: &str, count| {
+            (1..=count)
+                .map(|rank| IconCandidate {
+                    name: format!("{country}{rank}"),
+                    developer: String::new(),
+                    icon_url: String::new(),
+                    store_url: String::new(),
+                    bundle_id: String::new(),
+                })
+                .collect()
+        };
+        for (cn_count, us_count, expected) in [
+            (4, 4, vec!["cn1", "us1", "cn2", "us2", "cn3", "us3"]),
+            (1, 3, vec!["cn1", "us1", "us2", "us3"]),
+            (3, 1, vec!["cn1", "us1", "cn2", "cn3"]),
+            (0, 3, vec!["us1", "us2", "us3"]),
+            (0, 0, vec![]),
+        ] {
+            let names: Vec<_> =
+                interleave_candidates(candidates("cn", cn_count), candidates("us", us_count))
+                    .into_iter()
+                    .map(|candidate| candidate.name)
+                    .collect();
+            assert_eq!(names, expected);
+        }
+    }
 
     #[test]
     fn only_allows_https_mzstatic_hosts() {
