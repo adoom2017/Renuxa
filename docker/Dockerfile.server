@@ -44,7 +44,7 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/*
 
 COPY --from=build-server /app/target/release/renuxa-server /usr/local/bin/renuxa-server
-COPY --from=build-server /app/target/release/worker /usr/local/bin/worker
+COPY --from=build-server /app/target/release/worker /usr/local/bin/renuxa-worker
 COPY --from=build-gateway /app/target/release/im-channel-gateway /usr/local/bin/im-channel-gateway
 COPY docker/wechat.toml /etc/renuxa/wechat.toml
 
