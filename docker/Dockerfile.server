@@ -1,27 +1,40 @@
 # syntax=docker/dockerfile:1.7
 
-FROM rust:1.96-bookworm AS build
+FROM lukemathwalker/cargo-chef:latest-rust-1.98.1-bookworm AS planner
 WORKDIR /app
 
-ENV CARGO_INCREMENTAL=0
-ENV CARGO_BUILD_JOBS=1
+# The desktop crate is not part of the server image. Keep the repository
+# workspace unchanged and remove it only inside the build container.
+COPY . .
+RUN sed -i 's/, "src-tauri"//' Cargo.toml && \
+    cargo chef prepare --recipe-path recipe.json
+
+FROM lukemathwalker/cargo-chef:latest-rust-1.98.1-bookworm AS dependencies
+WORKDIR /app
 ARG TARGETARCH
+COPY --from=planner /app/recipe.json recipe.json
+RUN --mount=type=cache,id=renuxa-cargo-registry-${TARGETARCH},target=/usr/local/cargo/registry,sharing=locked \
+    --mount=type=cache,id=renuxa-cargo-git-${TARGETARCH},target=/usr/local/cargo/git,sharing=locked \
+    cargo chef cook --release --recipe-path recipe.json
 
-COPY Cargo.toml Cargo.lock ./
-COPY server/Cargo.toml ./server/Cargo.toml
-COPY src-tauri/Cargo.toml src-tauri/build.rs ./src-tauri/
-COPY src-tauri/src ./src-tauri/src
-COPY server ./server
-COPY im-channel-gateway ./im-channel-gateway
+FROM lukemathwalker/cargo-chef:latest-rust-1.98.1-bookworm AS source
+WORKDIR /app
+COPY . .
+RUN sed -i 's/, "src-tauri"//' Cargo.toml
 
-RUN --mount=type=cache,id=renuxa-cargo-registry-${TARGETARCH},target=/usr/local/cargo/registry \
-    --mount=type=cache,id=renuxa-cargo-git-${TARGETARCH},target=/usr/local/cargo/git \
-    --mount=type=cache,id=renuxa-target-${TARGETARCH},target=/app/target \
-    touch server/src/lib.rs server/src/main.rs server/src/bin/worker.rs && \
-    cargo build --locked --release -p renuxa-server -p im-channel-gateway --bins && \
-    cp /app/target/release/renuxa-server /tmp/renuxa-server && \
-    cp /app/target/release/worker /tmp/renuxa-worker && \
-    cp /app/target/release/im-channel-gateway /tmp/im-channel-gateway
+FROM source AS build-server
+ARG TARGETARCH
+COPY --from=dependencies /app/target /app/target
+RUN --mount=type=cache,id=renuxa-cargo-registry-${TARGETARCH},target=/usr/local/cargo/registry,sharing=locked \
+    --mount=type=cache,id=renuxa-cargo-git-${TARGETARCH},target=/usr/local/cargo/git,sharing=locked \
+    cargo build --locked --release -p renuxa-server --bins
+
+FROM source AS build-gateway
+ARG TARGETARCH
+COPY --from=dependencies /app/target /app/target
+RUN --mount=type=cache,id=renuxa-cargo-registry-${TARGETARCH},target=/usr/local/cargo/registry,sharing=locked \
+    --mount=type=cache,id=renuxa-cargo-git-${TARGETARCH},target=/usr/local/cargo/git,sharing=locked \
+    cargo build --locked --release -p im-channel-gateway --bin im-channel-gateway
 
 FROM debian:bookworm-slim
 RUN apt-get update && \
@@ -30,9 +43,9 @@ RUN apt-get update && \
     mkdir -p /var/lib/renuxa-wechat && chown renuxa:renuxa /var/lib/renuxa-wechat && \
     rm -rf /var/lib/apt/lists/*
 
-COPY --from=build /tmp/renuxa-server /usr/local/bin/renuxa-server
-COPY --from=build /tmp/renuxa-worker /usr/local/bin/renuxa-worker
-COPY --from=build /tmp/im-channel-gateway /usr/local/bin/im-channel-gateway
+COPY --from=build-server /app/target/release/renuxa-server /usr/local/bin/renuxa-server
+COPY --from=build-server /app/target/release/worker /usr/local/bin/worker
+COPY --from=build-gateway /app/target/release/im-channel-gateway /usr/local/bin/im-channel-gateway
 COPY docker/wechat.toml /etc/renuxa/wechat.toml
 
 USER renuxa
