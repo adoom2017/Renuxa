@@ -28,6 +28,8 @@ pub fn router() -> Router<AppState> {
             "/subscriptions",
             get(list_subscriptions).post(create_subscription),
         )
+        .route("/subscriptions/export", get(export_subscriptions))
+        .route("/subscriptions/import", post(import_subscriptions))
         .route(
             "/subscriptions/{id}",
             patch(update_subscription).delete(archive_subscription),
@@ -109,6 +111,22 @@ async fn list_subscriptions(
     let rows = sqlx::query_as::<_, Subscription>("SELECT s.id,s.name,s.plan_name,s.amount,s.currency,s.cadence_unit,s.cadence_interval,s.next_billing_date,s.start_date,s.anchor_day,s.status,s.category,s.payment_method,s.notes,s.icon_url,coalesce((SELECT array_agg(r.days_before ORDER BY r.days_before DESC) FROM subscription_reminders r WHERE r.subscription_id=s.id),ARRAY[]::integer[]) reminder_offsets,s.created_at,s.updated_at FROM subscriptions s WHERE s.user_id=$1 AND s.status <> 'archived' ORDER BY s.next_billing_date")
         .bind(user.0).fetch_all(&state.db).await?;
     Ok(Json(rows))
+}
+
+const SUBSCRIPTION_EXPORT_VERSION: u32 = 1;
+
+async fn export_subscriptions(user: CurrentUser, State(state): State<AppState>) -> Result<Json<Value>, ApiError> {
+    let rows = sqlx::query_as::<_, Subscription>("SELECT s.id,s.name,s.plan_name,s.amount,s.currency,s.cadence_unit,s.cadence_interval,s.next_billing_date,s.start_date,s.anchor_day,s.status,s.category,s.payment_method,s.notes,s.icon_url,coalesce((SELECT array_agg(r.days_before ORDER BY r.days_before DESC) FROM subscription_reminders r WHERE r.subscription_id=s.id),ARRAY[]::integer[]) reminder_offsets,s.created_at,s.updated_at FROM subscriptions s WHERE s.user_id=$1 AND s.status <> 'archived' ORDER BY s.next_billing_date").bind(user.0).fetch_all(&state.db).await?;
+    Ok(Json(json!({"format":"renuxa-subscriptions", "version": SUBSCRIPTION_EXPORT_VERSION, "subscriptions": rows})))
+}
+
+async fn import_subscriptions(user: CurrentUser, State(state): State<AppState>, Json(payload): Json<Value>) -> Result<Json<Value>, ApiError> {
+    let version = payload.get("version").and_then(Value::as_u64).ok_or_else(|| ApiError::Validation("缺少导出版本".into()))? as u32;
+    if version != SUBSCRIPTION_EXPORT_VERSION { return Err(ApiError::Validation(format!("不支持的订阅导出版本: {version}"))); }
+    let items = payload.get("subscriptions").and_then(Value::as_array).ok_or_else(|| ApiError::Validation("订阅数据格式不正确".into()))?;
+    let mut tx = state.db.begin().await?; let mut count = 0;
+    for item in items { let input: CreateSubscription = serde_json::from_value(item.clone()).map_err(|_| ApiError::Validation("订阅数据格式不正确".into()))?; crate::subscriptions::create(&mut tx, user.0, input).await?; count += 1; }
+    tx.commit().await?; Ok(Json(json!({"imported": count, "version": SUBSCRIPTION_EXPORT_VERSION})))
 }
 
 async fn create_subscription(

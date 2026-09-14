@@ -3,7 +3,7 @@
 import {
   Bell, CalendarDays, Check, ChevronLeft, ChevronRight, CreditCard, Globe2,
   LayoutDashboard, Menu, Pause, Pencil, Play, Plus, ReceiptText, Send,
-  RefreshCw, Search, Settings, ShieldCheck, SlidersHorizontal, Trash2,
+  RefreshCw, Search, Settings, ShieldCheck, SlidersHorizontal, Trash2, Upload, Download,
   X,
 } from 'lucide-react';
 import { FormEvent, useEffect, useRef, useState } from 'react';
@@ -123,6 +123,8 @@ export default function RenuxaApp() {
   };
   const updateStatus = (id: string, status: Status) => { setSubscriptions((current) => current.map((sub) => sub.id === id ? { ...sub, status } : sub)); if(token) void apiRequest(`/subscriptions/${id}`, {method:'PATCH',body:JSON.stringify({status})}, token).catch(()=>undefined); };
   const removeSubscription = (id: string) => { setSubscriptions((current) => current.filter((sub) => sub.id !== id)); if(token) void apiRequest(`/subscriptions/${id}`, {method:'DELETE'}, token).catch(()=>undefined); };
+  const exportSubscriptions = async () => { if (!token) return; const data = await apiRequest<Record<string, unknown>>('/subscriptions/export', {}, token); const blob = new Blob([JSON.stringify(data, null, 2)], {type:'application/json'}); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href=url; a.download='renuxa-subscriptions.json'; a.click(); URL.revokeObjectURL(url); };
+  const importSubscriptions = async (file: File) => { if (!token) return; await apiRequest('/subscriptions/import', {method:'POST', body: await file.text()}, token); setRefreshVersion(v=>v+1); };
   const updateBill = async (id:string,status:BillStatus) => {
     if (apiUrl) await apiRequest(`/bills/${id}`, {method:'PATCH',body:JSON.stringify({status})}, token);
     setBills((all) => all.map((bill) => bill.id === id ? { ...bill, status, source:'manual' } : bill));
@@ -157,7 +159,7 @@ export default function RenuxaApp() {
       <section className="content">
         <div className="mobile-topbar"><button onClick={() => setMobileNav(!mobileNav)} aria-label="打开菜单"><Menu /></button><strong><AppImage src="/renuxa-logo.svg" alt="Renuxa" width={25} height={25} priority />续序</strong><button onClick={() => setModalOpen(true)} aria-label={t.add}><Plus /></button></div>
         {view === 'dashboard' && <Dashboard subscriptions={subscriptions} bills={bills} currency={baseCurrency} t={t} onAdd={() => setModalOpen(true)} onView={changeView} />}
-        {view === 'subscriptions' && <><div className="row-actions"><button title="刷新订阅" aria-label="刷新订阅" onClick={()=>setRefreshVersion(v=>v+1)}><RefreshCw size={18}/></button></div>{refreshError&&<p role="alert">{refreshError}</p>}<SubscriptionsView subscriptions={subscriptions} t={t} onAdd={() => {setEditingSubscription(null);setModalOpen(true);}} onEdit={(sub) => {setEditingSubscription(sub);setModalOpen(true);}} onStatus={updateStatus} onRemove={removeSubscription} /></>}
+        {view === 'subscriptions' && <><div className="row-actions"><button title="导入订阅" aria-label="导入订阅" onClick={()=>document.getElementById('subscription-import')?.click()}><Upload size={18}/></button><input id="subscription-import" type="file" accept="application/json" hidden onChange={e=>{const f=e.target.files?.[0]; if(f) void importSubscriptions(f); e.currentTarget.value='';}}/><button title="导出订阅" aria-label="导出订阅" onClick={()=>void exportSubscriptions()}><Download size={18}/></button><button title="刷新订阅" aria-label="刷新订阅" onClick={()=>setRefreshVersion(v=>v+1)}><RefreshCw size={18}/></button></div>{refreshError&&<p role="alert">{refreshError}</p>}<SubscriptionsView subscriptions={subscriptions} t={t} onAdd={() => {setEditingSubscription(null);setModalOpen(true);}} onEdit={(sub) => {setEditingSubscription(sub);setModalOpen(true);}} onStatus={updateStatus} onRemove={removeSubscription} /></>}
         {view === 'bills' && <BillsView bills={bills} subscriptions={subscriptions} currency={baseCurrency} token={token} t={t} onUpdate={updateBill} onRefresh={()=>setRefreshVersion(v=>v+1)} refreshError={refreshError} />}
         {view === 'notifications' && <NotificationsView notices={notices} t={t} onRead={readNotice} onReadAll={readAllNotices} />}
         {view === 'settings' && <><SettingsView locale={locale} setLocale={setLocale} currency={baseCurrency} setCurrency={setBaseCurrency} t={t} token={token} userEmail={userEmail} onLogout={() => { setToken(null); setUserEmail(''); }} /><WechatSettings token={token}/></>}
