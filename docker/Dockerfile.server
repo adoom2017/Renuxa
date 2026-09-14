@@ -27,14 +27,14 @@ ARG TARGETARCH
 COPY --from=dependencies /app/target /app/target
 RUN --mount=type=cache,id=renuxa-cargo-registry-${TARGETARCH},target=/usr/local/cargo/registry,sharing=locked \
     --mount=type=cache,id=renuxa-cargo-git-${TARGETARCH},target=/usr/local/cargo/git,sharing=locked \
-    cargo build --locked --release -p renuxa-server --bins
+    cargo build --offline --release -p renuxa-server --bins
 
 FROM source AS build-gateway
 ARG TARGETARCH
 COPY --from=dependencies /app/target /app/target
 RUN --mount=type=cache,id=renuxa-cargo-registry-${TARGETARCH},target=/usr/local/cargo/registry,sharing=locked \
     --mount=type=cache,id=renuxa-cargo-git-${TARGETARCH},target=/usr/local/cargo/git,sharing=locked \
-    cargo build --locked --release -p im-channel-gateway --bin im-channel-gateway
+    cargo build --offline --release -p im-channel-gateway --bin im-channel-gateway
 
 FROM debian:bookworm-slim
 RUN apt-get update && \
