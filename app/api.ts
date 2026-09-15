@@ -1,4 +1,4 @@
-import type { Subscription, Status } from './models';
+import type { Subscription, Status, NotificationSettings, TestNotificationSettings } from './models';
 import { colors } from './constants';
 
 const configuredApiUrl = import.meta.env.VITE_API_URL?.replace(/\/$/, '');
@@ -37,4 +37,16 @@ export async function allBills(token: string) {
     bills.push(...page);
     if (page.length < 200) return bills;
   }
+}
+
+export function getNotificationSettings(token: string) {
+  return apiRequest<NotificationSettings>('/notification-settings', {}, token);
+}
+
+export function saveNotificationSettings(input: TestNotificationSettings & { telegram_enabled: boolean }, token: string) {
+  return apiRequest<NotificationSettings>('/notification-settings', { method: 'PUT', body: JSON.stringify(input) }, token);
+}
+
+export function testNotificationSettings(input: TestNotificationSettings, token: string) {
+  return apiRequest<null>('/notification-settings/test', { method: 'POST', body: JSON.stringify(input) }, token);
 }

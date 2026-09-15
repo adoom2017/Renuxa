@@ -112,17 +112,14 @@ async fn deliver_telegram(state: &AppState) {
             .get::<Option<String>, _>("telegram_bot_token")
             .unwrap_or_default();
         let chat_id: String = row.get("telegram_chat_id");
-        let endpoint = format!("https://api.telegram.org/bot{token}/sendMessage");
-        let sent = state
-            .http
-            .post(&endpoint)
-            .json(&serde_json::json!({
-                "chat_id": chat_id,
-                "text": format!("{title}\n\n{body}"),
-            }))
-            .send()
-            .await
-            .is_ok_and(|response| response.status().is_success());
+        let sent = crate::notifications::send_telegram(
+            &state.http,
+            &token,
+            &chat_id,
+            &format!("{title}\n\n{body}"),
+        )
+        .await
+        .is_ok();
         record_delivery_result(state, delivery_id, sent).await;
     }
 }

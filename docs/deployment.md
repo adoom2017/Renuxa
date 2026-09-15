@@ -68,6 +68,9 @@ docker compose --env-file .env -f docker/compose.build.yml up --build -d --wait
 用户登录后在“设置 → 通知”配置 Telegram 的 Bot Token 和 Chat ID。
 应用内通知始终启用；Telegram 凭据按账户独立保存，读取接口不会返回 Bot Token，
 保存时留空会保留已有密钥。Worker 必须运行，才会生成续费提醒和发送通知。
+填写后可点击“测试通知”立即发送测试消息，查看发送结果或失败原因；测试使用当前
+表单值，Bot Token 留空时沿用已保存值。测试不会保存配置，确认后仍需点击“保存设置”。
+测试由 API 直接发送，因此 API 和 Worker 都需要能访问 `api.telegram.org`。
 
 ## 汇率同步排障
 

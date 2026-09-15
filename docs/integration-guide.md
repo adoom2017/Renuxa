@@ -17,6 +17,7 @@ API 默认监听容器内 `8080`。本地构建 Compose 默认发布到
 | `GET` | `/api/notifications` | 查询通知 |
 | `POST` | `/api/notifications/{id}/read` | 标记通知已读 |
 | `GET, PUT` | `/api/notification-settings` | 获取或更新通知渠道 |
+| `POST` | `/api/notification-settings/test` | 使用当前配置发送 Telegram 测试消息 |
 | `GET` | `/api/icons/search` | 搜索美国区 App Store 订阅图标（固定 `country=us`） |
 | `GET` | `/api/icons/image` | 代理允许来源的图标 |
 | `GET` | `/api/exchange-rates` | 查询汇率 |
@@ -32,6 +33,20 @@ API 默认监听容器内 `8080`。本地构建 Compose 默认发布到
 ```json
 {"error":{"code":422,"message":"请求内容无效: ..."}}
 ```
+
+## 通知测试
+
+`POST /api/notification-settings/test` 需要账户 JWT，提交当前表单中的配置：
+
+```json
+{"telegram_bot_token":null,"telegram_chat_id":"123456789"}
+```
+
+`telegram_bot_token` 省略、为 null 或空白时，沿用当前账户已保存的 Token；
+非空时使用新值。Chat ID 必填。测试不会保存设置或修改通知开关，也不会写入通知中心。
+API 直接发送一条标为测试的 Telegram 消息，无需等待 Worker，10 秒超时。
+成功返回 `204`；缺少配置返回 `422`；发送失败返回 `502`，错误消息包含凭据、
+会话权限、限流或网络问题的提示，不返回 Token 或 Telegram 原始响应。
 
 ## 订阅开始日期与记账
 

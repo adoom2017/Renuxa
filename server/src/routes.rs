@@ -42,6 +42,10 @@ pub fn router() -> Router<AppState> {
             "/notification-settings",
             get(get_notification_settings).put(update_notification_settings),
         )
+        .route(
+            "/notification-settings/test",
+            post(crate::notifications::test_notification_settings),
+        )
         .merge(icons::router())
         .route("/exchange-rates", get(exchange_rates))
         .route("/dashboard", get(dashboard))

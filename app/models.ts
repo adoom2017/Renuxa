@@ -13,4 +13,6 @@ export type Notice = { id: string; title: string; body: string; date: string; re
 export type NotificationSettings = {
   telegram_enabled: boolean; telegram_bot_token_configured: boolean; telegram_chat_id: string;
 };
-
+export type TestNotificationSettings = {
+  telegram_bot_token: string | null; telegram_chat_id: string;
+};

@@ -17,6 +17,8 @@ pub enum ApiError {
     Database(#[from] sqlx::Error),
     #[error("外部服务暂不可用")]
     Upstream,
+    #[error("{0}")]
+    NotificationDelivery(&'static str),
     #[error("内部服务错误")]
     Internal,
 }
@@ -27,7 +29,7 @@ impl IntoResponse for ApiError {
             Self::Unauthorized => StatusCode::UNAUTHORIZED,
             Self::Validation(_) => StatusCode::UNPROCESSABLE_ENTITY,
             Self::NotFound => StatusCode::NOT_FOUND,
-            Self::Upstream => StatusCode::BAD_GATEWAY,
+            Self::Upstream | Self::NotificationDelivery(_) => StatusCode::BAD_GATEWAY,
             Self::Database(_) | Self::Internal => StatusCode::INTERNAL_SERVER_ERROR,
         };
         (

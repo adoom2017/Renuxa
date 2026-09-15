@@ -10,7 +10,7 @@ import { FormEvent, useEffect, useRef, useState } from 'react';
 import type { View, Status, BillStatus, Locale, Subscription, Bill, Notice, NotificationSettings } from './models';
 import { seedSubscriptions, seedBills, seedNotices } from './demo-data';
 import { rates, colors } from './constants';
-import { apiUrl, apiRequest, remoteSubscription, allBills } from './api';
+import { apiUrl, apiRequest, remoteSubscription, allBills, getNotificationSettings, saveNotificationSettings as saveNotificationSettingsRequest, testNotificationSettings } from './api';
 import { copy } from './copy';
 import { useStoredState } from './use-stored-state';
 import { money } from './format';
@@ -266,32 +266,65 @@ function SettingsView({ locale, setLocale, currency, setCurrency, t, token, user
   const [telegramToken,setTelegramToken]=useState('');
   const [saveState,setSaveState]=useState<'idle'|'saving'|'saved'|'error'>('idle');
   const [saveError,setSaveError]=useState('');
+  const [settingsLoading,setSettingsLoading]=useState(Boolean(token));
+  const [testState,setTestState]=useState<'idle'|'sending'|'sent'|'error'>('idle');
+  const [testMessage,setTestMessage]=useState('');
+  const notificationRequestPending=useRef(false);
+  const notificationBusy=settingsLoading||saveState==='saving'||testState==='sending';
 
   useEffect(()=>{
     if (!token) return;
-    apiRequest('/notification-settings',{},token)
-      .then((value)=>setNotificationSettings(value as NotificationSettings))
-      .catch(()=>setSaveError('通知设置加载失败'));
+    let active=true;
+    getNotificationSettings(token)
+      .then((value)=>{if(active)setNotificationSettings(value);})
+      .catch(()=>{if(active){setSaveState('error');setSaveError('通知设置加载失败');}})
+      .finally(()=>{if(active)setSettingsLoading(false);});
+    return ()=>{active=false;};
   },[token]);
 
-  const updateNotificationSetting=<K extends keyof NotificationSettings,>(key:K,value:NotificationSettings[K])=>setNotificationSettings((current)=>({...current,[key]:value}));
+  const clearNotificationFeedback=()=>{
+    setSaveState('idle'); setSaveError(''); setTestState('idle'); setTestMessage('');
+  };
+  const updateNotificationSetting=<K extends keyof NotificationSettings,>(key:K,value:NotificationSettings[K])=>{
+    setNotificationSettings((current)=>({...current,[key]:value}));
+    clearNotificationFeedback();
+  };
   const saveNotificationSettings=async(event:FormEvent)=>{
     event.preventDefault();
-    if (!token) return;
+    if (!token||notificationBusy||notificationRequestPending.current) return;
+    notificationRequestPending.current=true;
     setSaveState('saving'); setSaveError('');
     try {
-      const saved=await apiRequest('/notification-settings',{method:'PUT',body:JSON.stringify({
+      const saved=await saveNotificationSettingsRequest({
         telegram_enabled:notificationSettings.telegram_enabled,
-        telegram_bot_token:telegramToken||null,
+        telegram_bot_token:telegramToken.trim()||null,
         telegram_chat_id:notificationSettings.telegram_chat_id,
-      })},token) as NotificationSettings;
+      },token);
       setNotificationSettings(saved); setTelegramToken(''); setSaveState('saved');
     } catch(reason) {
       setSaveState('error'); setSaveError(reason instanceof Error?reason.message:'保存失败');
+    } finally {
+      notificationRequestPending.current=false;
+    }
+  };
+  const testNotifications=async()=>{
+    if (!token||notificationBusy||notificationRequestPending.current) return;
+    notificationRequestPending.current=true;
+    setTestState('sending'); setTestMessage('');
+    try {
+      await testNotificationSettings({
+        telegram_bot_token:telegramToken.trim()||null,
+        telegram_chat_id:notificationSettings.telegram_chat_id,
+      },token);
+      setTestState('sent'); setTestMessage('测试消息已发送，请查收 Telegram');
+    } catch(reason) {
+      setTestState('error'); setTestMessage(reason instanceof Error?reason.message:'测试发送失败');
+    } finally {
+      notificationRequestPending.current=false;
     }
   };
 
-  return <><PageHeader eyebrow="PREFERENCES" title={t.settings} description={t.settingsDesc}/><div className="settings-layout"><nav className="settings-nav" aria-label="设置分类"><button className={tab==='general'?'active':''} onClick={()=>setTab('general')}><Globe2/>通用</button><button className={tab==='notifications'?'active':''} onClick={()=>setTab('notifications')}><Bell/>通知</button><button className={tab==='security'?'active':''} onClick={()=>setTab('security')}><ShieldCheck/>账户与安全</button></nav><section className="settings-content">{tab==='general'&&<div className="settings-group"><h2>显示与地区</h2><SettingRow title="界面语言" description="更改界面中的文字语言"><select aria-label="界面语言" value={locale} onChange={(e)=>setLocale(e.target.value as Locale)}><option value="zh-CN">简体中文</option><option value="en">English</option></select></SettingRow><SettingRow title="基准货币" description="仪表盘和统计的默认折算货币"><select aria-label="基准货币" value={currency} onChange={(e)=>setCurrency(e.target.value)}>{Object.keys(rates).map((code)=><option key={code}>{code}</option>)}</select></SettingRow><SettingRow title="时区" description="用于界面中的日期和时间"><select aria-label="时区" value={timezone} onChange={(e)=>setTimezone(e.target.value)}><option>Asia/Shanghai</option><option>Asia/Hong_Kong</option><option>America/New_York</option><option>Europe/London</option></select></SettingRow></div>}{tab==='notifications'&&<form className="settings-group" onSubmit={saveNotificationSettings}><h2>通知渠道</h2><SettingRow title="应用内通知" description="续费提醒始终保留在通知中心"><span className="setting-value">始终启用</span></SettingRow><div className="notification-channel"><div className="channel-heading"><span className="channel-icon telegram"><Send/></span><div><strong>Telegram</strong><small>通过机器人发送续费提醒</small></div><button type="button" className={`toggle ${notificationSettings.telegram_enabled?'on':''}`} aria-label="启用 Telegram" aria-pressed={notificationSettings.telegram_enabled} onClick={()=>updateNotificationSetting('telegram_enabled',!notificationSettings.telegram_enabled)}><span/></button></div>{notificationSettings.telegram_enabled&&<div className="channel-fields"><label className="field"><span>Bot Token</span><input type="password" autoComplete="new-password" value={telegramToken} onChange={(e)=>setTelegramToken(e.target.value)} placeholder={notificationSettings.telegram_bot_token_configured?'已配置，留空保持不变':'从 BotFather 获取'}/></label><label className="field"><span>Chat ID</span><input value={notificationSettings.telegram_chat_id} onChange={(e)=>updateNotificationSetting('telegram_chat_id',e.target.value)} placeholder="例如：123456789"/></label></div>}</div><div className="reminder-row"><div><strong>提前提醒</strong><small>新订阅默认使用，可在单项中覆盖</small></div><div className="reminder-chips">{[14,7,3,1].map((day)=><button type="button" aria-pressed={reminders.includes(day)} key={day} className={reminders.includes(day)?'active':''} onClick={()=>setReminders(reminders.includes(day)?reminders.filter((v)=>v!==day):[...reminders,day].sort((a,b)=>b-a))}>{day} 天</button>)}</div></div><div className="settings-actions"><span className={saveState==='error'?'save-error':'save-status'}>{saveError||(saveState==='saved'?'设置已保存':'')}</span><button className="primary" disabled={!token||saveState==='saving'}>{saveState==='saving'?<RefreshCw className="spin"/>:<Check/>}保存设置</button></div></form>}{tab==='security'&&<div className="settings-group"><h2>账户与安全</h2><SettingRow title="当前账户" description={userEmail||'已连接 Renuxa 服务端'}><span className="setting-value">已登录</span></SettingRow><SettingRow title="退出登录" description="此设备上的订阅数据将在再次登录后同步"><button className="secondary" onClick={onLogout}>退出登录</button></SettingRow></div>}</section></div></>;
+  return <><PageHeader eyebrow="PREFERENCES" title={t.settings} description={t.settingsDesc}/><div className="settings-layout"><nav className="settings-nav" aria-label="设置分类"><button className={tab==='general'?'active':''} onClick={()=>setTab('general')}><Globe2/>通用</button><button className={tab==='notifications'?'active':''} onClick={()=>setTab('notifications')}><Bell/>通知</button><button className={tab==='security'?'active':''} onClick={()=>setTab('security')}><ShieldCheck/>账户与安全</button></nav><section className="settings-content">{tab==='general'&&<div className="settings-group"><h2>显示与地区</h2><SettingRow title="界面语言" description="更改界面中的文字语言"><select aria-label="界面语言" value={locale} onChange={(e)=>setLocale(e.target.value as Locale)}><option value="zh-CN">简体中文</option><option value="en">English</option></select></SettingRow><SettingRow title="基准货币" description="仪表盘和统计的默认折算货币"><select aria-label="基准货币" value={currency} onChange={(e)=>setCurrency(e.target.value)}>{Object.keys(rates).map((code)=><option key={code}>{code}</option>)}</select></SettingRow><SettingRow title="时区" description="用于界面中的日期和时间"><select aria-label="时区" value={timezone} onChange={(e)=>setTimezone(e.target.value)}><option>Asia/Shanghai</option><option>Asia/Hong_Kong</option><option>America/New_York</option><option>Europe/London</option></select></SettingRow></div>}{tab==='notifications'&&<form className="settings-group" onSubmit={saveNotificationSettings}><h2>通知渠道</h2><SettingRow title="应用内通知" description="续费提醒始终保留在通知中心"><span className="setting-value">始终启用</span></SettingRow><div className="notification-channel"><div className="channel-heading"><span className="channel-icon telegram"><Send/></span><div><strong>Telegram</strong><small>通过机器人发送续费提醒</small></div><button type="button" className={`toggle ${notificationSettings.telegram_enabled?'on':''}`} disabled={notificationBusy} aria-label="启用 Telegram" aria-pressed={notificationSettings.telegram_enabled} onClick={()=>updateNotificationSetting('telegram_enabled',!notificationSettings.telegram_enabled)}><span/></button></div>{notificationSettings.telegram_enabled&&<div className="channel-fields"><label className="field"><span>Bot Token</span><input type="password" autoComplete="new-password" disabled={notificationBusy} value={telegramToken} onChange={(e)=>{setTelegramToken(e.target.value);clearNotificationFeedback();}} placeholder={notificationSettings.telegram_bot_token_configured?'已配置，留空保持不变':'从 BotFather 获取'}/></label><label className="field"><span>Chat ID</span><input disabled={notificationBusy} value={notificationSettings.telegram_chat_id} onChange={(e)=>updateNotificationSetting('telegram_chat_id',e.target.value)} placeholder="例如：123456789"/></label><div className="channel-test-actions span-2"><span role={testState==='error'?'alert':'status'} className={testState==='error'?'save-error':'save-status'}>{testMessage}</span><button type="button" className="secondary" onClick={()=>void testNotifications()} disabled={!token||notificationBusy||!notificationSettings.telegram_chat_id.trim()||(!telegramToken.trim()&&!notificationSettings.telegram_bot_token_configured)}>{testState==='sending'?<RefreshCw size={15} className="spin"/>:<Send size={15}/>} {testState==='sending'?'发送中...':'测试通知'}</button></div></div>}</div><div className="reminder-row"><div><strong>提前提醒</strong><small>新订阅默认使用，可在单项中覆盖</small></div><div className="reminder-chips">{[14,7,3,1].map((day)=><button type="button" aria-pressed={reminders.includes(day)} key={day} className={reminders.includes(day)?'active':''} onClick={()=>setReminders(reminders.includes(day)?reminders.filter((v)=>v!==day):[...reminders,day].sort((a,b)=>b-a))}>{day} 天</button>)}</div></div><div className="settings-actions"><span role={saveState==='error'?'alert':'status'} className={saveState==='error'?'save-error':'save-status'}>{saveError||(saveState==='saved'?'设置已保存':'')}</span><button className="primary" disabled={!token||notificationBusy}>{saveState==='saving'?<RefreshCw className="spin"/>:<Check/>}保存设置</button></div></form>}{tab==='security'&&<div className="settings-group"><h2>账户与安全</h2><SettingRow title="当前账户" description={userEmail||'已连接 Renuxa 服务端'}><span className="setting-value">已登录</span></SettingRow><SettingRow title="退出登录" description="此设备上的订阅数据将在再次登录后同步"><button className="secondary" onClick={onLogout}>退出登录</button></SettingRow></div>}</section></div></>;
 }
 
 function WechatSettings({token}:{token:string|null}) {

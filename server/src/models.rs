@@ -77,6 +77,12 @@ pub struct UpdateNotificationSettings {
     pub telegram_chat_id: String,
 }
 
+#[derive(Deserialize)]
+pub struct TestNotificationSettings {
+    pub telegram_bot_token: Option<String>,
+    pub telegram_chat_id: String,
+}
+
 #[derive(Debug, Serialize, FromRow)]
 pub struct NotificationSettings {
     pub telegram_enabled: bool,

@@ -2,6 +2,7 @@ pub mod auth;
 pub mod error;
 pub mod exchange_rates;
 pub mod models;
+pub mod notifications;
 pub mod routes;
 pub mod subscriptions;
 pub mod wechat;
